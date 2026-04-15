@@ -1,0 +1,22 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv/
+
+# Project-specific ignores
+.cache/
+scratch/
+server.log
+.pytest_cache/
+.python-version
+.roo-code.json
+
+# verify.sh artifacts (local machine-readable reports)
+verify-last-result.json
+verify-pytest-failures.txt

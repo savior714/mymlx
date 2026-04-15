@@ -1,0 +1,29 @@
+[project]
+name = "mlx-server"
+version = "0.1.0"
+description = "Starlette wrapper around mlx_lm.server: OpenAI-style API and model lifecycle endpoints"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.28.1",
+    "mlx-lm>=0.31.2",
+    "pyyaml>=6.0.3",
+    "starlette>=1.0.0",
+    "uvicorn>=0.44.0",
+    "xxhash>=3.6.0",
+]
+
+[project.scripts]
+mlx-server = "mlx_server.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.11.6,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
