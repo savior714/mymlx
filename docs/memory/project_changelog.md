@@ -26,6 +26,11 @@
 - **run.sh 인터페이스 개선**: fzf/rofi가 설치되어 있으면 터미널 UI로 모델 선택, 없으면 기존 숫자 메뉴 폴백 방식으로 인터페이스를 개선했습니다.
 - **run.sh 이전 값 자동 적용 (v5)**: `read -p "Temperature [$USER_TEMP]: " input` 형식으로 파라미터 입력 시 이전 값을 표시하고, 사용자가 엔터만 치면(입력하지 않으면) 이전 값이 자동으로 유지되도록 개선했습니다. 모델 선택 시에도 동일한 방식으로 이전 값이 자동 적용됩니다.
 - **run.sh 메모리 할당 옵션 추가 (v6)**: `run.sh`에 메모리 관련 옵션(`--prompt-cache-size`, `--decode-concurrency`, `--prompt-concurrency`, `--prefill-step-size`)을 추가하여, 터미널에서 직접 메모리 설정을 조정할 수 있도록 개선했습니다. 설정 지속성(`~/.mlx-server/config`)도 메모리 옵션을 포함하도록 확장했습니다.
+### [2026-04-16]
+- **[Git]** 프로젝트 코드를 신규 원격 저장소(`https://github.com/savior714/mymlx`)에 푸시했습니다.
+    - `.gitignore` 최적화 (.cache, scratch, server.log 등 제외).
+    - 초기 커밋 및 `main` 브랜치 업로드 완료.
+
 ### [2026-04-15]
 - **[Refactor: Core Architecture Phase 1-4]**: 비즈니스 로직과 인프라 유틸리티 분리 완료.
     - **Phase 1**: `model_resolver.py`, `memory_manager.py` 신설 및 `backend.py` 정리. [DONE]
