@@ -109,6 +109,8 @@ def server_runtime_snapshot(mlx_args: Namespace) -> dict[str, Any]:
         "metal_memory_limit": getattr(mlx_args, "metal_memory_limit", None),
         "metal_cache_limit": getattr(mlx_args, "metal_cache_limit", None),
         "advanced_cache": getattr(mlx_args, "advanced_cache", None),
+        "draft_model": getattr(mlx_args, "draft_model", None),
+        "num_draft_tokens": getattr(mlx_args, "num_draft_tokens", None),
     }
 
 

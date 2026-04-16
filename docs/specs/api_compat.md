@@ -21,6 +21,7 @@ The following routes are forwarded to the embedded MLX HTTP server unchanged:
 | Method | Path | Purpose |
 |--------|------|---------|
 | `GET` | `/v1/mlx/status` | Process-local load state (see below) |
+| `GET` | `/v1/mlx/cache/stats` | **LRU 2.0 상세 캐시 통계** (VRAM/Disk 점유, 히트레이트, 축출 카운트 등) |
 | `GET` | `/v1/mlx/models/local?root=…` | 서버 파일시스템의 `root` 하위 디렉토리 목록 조회 (로컬 모델 탐색용) |
 | `GET` | `/v1/mlx/models/remote?q=…` | Hugging Face Hub 모델 검색 |
 | `POST` | `/v1/mlx/models/load` | 모델 명시적 로드/교체 (see `model_lifecycle.md`) |

@@ -244,6 +244,26 @@ def add_mlx_server_arguments(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--tool-choice-default",
+        type=str,
+        default="auto",
+        choices=["auto", "none", "required"],
+        help=(
+            "Default tool_choice injected into chat completion requests "
+            "when the client does not specify one. (default: auto)"
+        ),
+    )
+    parser.add_argument(
+        "--mcp-config-path",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help=(
+            "Path to an MCP configuration JSON file (e.g. ~/.mcp.json). "
+            "Exposed via GET /v1/mlx/mcp-config for client-side tool integration."
+        ),
+    )
+    parser.add_argument(
         "--audit-log-path",
         type=str,
         default=None,

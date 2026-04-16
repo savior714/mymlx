@@ -110,6 +110,79 @@ def _run_httpd(
         response_generator.stop_and_join()
 
 
+def _patch_tool_call_formatter() -> None:
+    """Patch ToolCallFormatter.__call__ to handle malformed tool calls gracefully.
+
+    The Gemma4 (and other) tool parsers raise ValueError when the model output
+    contains a tool call marker (<|tool_call>) but the content does not match
+    the expected pattern (e.g. empty call or wrong format). Without this patch
+    the socket-server thread crashes and the client receives a connection reset.
+    With this patch we log a warning and return an empty list so the response
+    is delivered cleanly with finish_reason="tool_calls" and tool_calls=[].
+    """
+    try:
+        import mlx_lm.server as _srv
+
+        original_call = _srv.ToolCallFormatter.__call__
+
+        def _safe_call(self, tool_calls):  # type: ignore[override]
+            try:
+                return original_call(self, tool_calls)
+            except ValueError as exc:
+                logger.warning(
+                    "Tool call parsing failed (malformed model output): %s. "
+                    "Returning empty tool_calls. Raw segments: %r",
+                    exc,
+                    tool_calls[:3] if tool_calls else [],
+                )
+                return []
+
+        _srv.ToolCallFormatter.__call__ = _safe_call
+        logger.info("Tool call formatter: error-handling patch applied")
+    except (ImportError, AttributeError):
+        logger.debug("Tool call formatter patch skipped (ToolCallFormatter not found)")
+
+
+def _patch_speculative_observability() -> None:
+    """Wrap stream_generate to log speculative decoding acceptance rate.
+
+    The upstream server discards ``GenerationResponse.from_draft`` in its
+    HTTP path, so we capture it here at the module level to provide
+    per-request observability via INFO logs.
+    """
+    original = _mlx_server_mod.stream_generate
+
+    @functools.wraps(original)
+    def _wrapped(*args, **kwargs):
+        draft_model = kwargs.get("draft_model")
+        if draft_model is None:
+            yield from original(*args, **kwargs)
+            return
+
+        accepted = 0
+        total = 0
+        num_draft = kwargs.get("num_draft_tokens", 3)
+        for gen in original(*args, **kwargs):
+            total += 1
+            if gen.from_draft:
+                accepted += 1
+            yield gen
+
+        if total > 0:
+            rate = accepted / total
+            logger.info(
+                "Speculative decoding stats: %d/%d tokens accepted "
+                "(α=%.2f), draft_tokens_per_step=%d",
+                accepted,
+                total,
+                rate,
+                num_draft,
+            )
+
+    _mlx_server_mod.stream_generate = _wrapped
+    logger.info("Speculative decoding observability enabled")
+
+
 def _patch_kv_quantization(kv_bits: int, kv_group_size: int = 64) -> None:
     """Inject kv_bits into mlx_lm.server's stream_generate calls.
 
@@ -133,15 +206,53 @@ def _patch_kv_quantization(kv_bits: int, kv_group_size: int = 64) -> None:
     )
 
 
+def _check_speculative_compat(model_provider: ModelProvider) -> bool:
+    """Return True if the loaded model's cache supports speculative decoding.
+
+    Speculative decoding requires every layer cache to be trimmable.
+    Hybrid architectures (SSM/recurrent layers) use ArraysCache which is
+    not trimmable, making them incompatible.
+    """
+    from mlx_lm.models.cache import make_prompt_cache, can_trim_prompt_cache
+
+    try:
+        model = model_provider.model
+        if model is None:
+            return True
+        test_cache = make_prompt_cache(model)
+        return can_trim_prompt_cache(test_cache)
+    except Exception:
+        logger.debug("Could not verify speculative decoding compatibility", exc_info=True)
+        return True
+
+
 def start_backend(mlx_args: Namespace) -> MlxBackend:
     """Wire Metal limits, build ModelProvider + ResponseGenerator, start internal httpd."""
+    _patch_tool_call_formatter()
+
     wired_limit = initialize_metal_infrastructure(mlx_args)
 
     kv_bits = getattr(mlx_args, "kv_bits", None)
     if kv_bits is not None:
         _patch_kv_quantization(kv_bits, getattr(mlx_args, "kv_group_size", 64))
 
+    draft_requested = getattr(mlx_args, "draft_model", None) is not None
+
+    if draft_requested:
+        _patch_speculative_observability()
+
     model_provider = ModelProvider(mlx_args)
+
+    if draft_requested and not _check_speculative_compat(model_provider):
+        logger.warning(
+            "⚠ --draft-model speculative decoding disabled: this model uses "
+            "non-trimmable cache layers (ArraysCache). Hybrid models like "
+            "Qwen3.5/Qwen3-Next support native MTP speculative decoding "
+            "(--mtp flag, requires mlx-lm with MTP support) instead of "
+            "--draft-model. Falling back to standard generation."
+        )
+        mlx_args.draft_model = None
+        model_provider.draft_model = None
 
     cache_kwargs = {"max_size": mlx_args.prompt_cache_size}
     if mlx_args.prompt_cache_bytes is not None:
@@ -150,7 +261,7 @@ def start_backend(mlx_args: Namespace) -> MlxBackend:
     
     if getattr(mlx_args, "advanced_cache", True):
         # Extract model_id from path or identity
-        m_path = getattr(mlx_args, "model", "default")
+        m_path = getattr(mlx_args, "model", None) or "default"
         model_id = m_path.split("/")[-1] if "/" in m_path else m_path
         
         prompt_cache = AdvancedPromptCache(

@@ -53,6 +53,8 @@ def _mlx_defaults() -> dict[str, Any]:
         "cache_headroom_ratio": 0.80,
         "audit_log_path": None,
         "audit_snapshot_path": None,
+        "tool_choice_default": "auto",
+        "mcp_config_path": None,
         "host": "127.0.0.1",
         "port": 0,
     }
@@ -131,6 +133,11 @@ def _env_mlx_overrides() -> dict[str, Any]:
         o["audit_log_path"] = v
     if v := env.get(f"{_ENV_PREFIX}AUDIT_SNAPSHOT_PATH"):
         o["audit_snapshot_path"] = v
+    if v := env.get(f"{_ENV_PREFIX}TOOL_CHOICE_DEFAULT"):
+        if v in ("auto", "none", "required"):
+            o["tool_choice_default"] = v
+    if v := env.get(f"{_ENV_PREFIX}MCP_CONFIG_PATH"):
+        o["mcp_config_path"] = v
     return o
 
 

@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -117,6 +118,35 @@ def _prepare_inference_audit(
     return audit, ctx
 
 
+_metrics_log = logging.getLogger("mlx_server.metrics")
+
+
+def _log_request_metrics(
+    *,
+    prompt_tokens: int | None,
+    completion_tokens: int,
+    ttft: float | None,
+    total_time: float,
+) -> None:
+    gen_time = total_time - (ttft if ttft is not None else 0)
+    tps = completion_tokens / gen_time if gen_time > 0 else 0.0
+
+    parts = [f"{completion_tokens} tokens", f"{tps:.1f} t/s"]
+
+    if prompt_tokens is not None and ttft is not None and ttft > 0:
+        pps = prompt_tokens / ttft
+        parts.append(f"{pps:.1f} pp/s")
+
+    if prompt_tokens is not None:
+        parts.append(f"{prompt_tokens} prompt")
+
+    if ttft is not None:
+        parts.append(f"{ttft:.2f}s TTFT")
+
+    parts.append(f"{total_time:.1f}s total")
+    _metrics_log.info("    ".join(parts))
+
+
 from mlx_server.request_transformer import MlxRequestTransformer
 
 # Backward compatibility for internal helpers used by tests
@@ -154,9 +184,11 @@ async def proxy_to_mlx(
     headers = _forward_request_headers(request)
     audit: InferenceAuditTrail | None = None
     audit_ctx: dict[str, Any] | None = None
+    start_time = time.monotonic()
 
     inference_paths = ("/v1/chat/completions", "/v1/completions", "/chat/completions")
-    if path in inference_paths and request.method == "POST":
+    is_inference = path in inference_paths and request.method == "POST"
+    if is_inference:
         data: dict | None = None
         try:
             parsed = json.loads(body)
@@ -167,11 +199,16 @@ async def proxy_to_mlx(
                 data = parsed
 
         if data is not None:
-            # Shift payload mutation to transformer
             mutated = MlxRequestTransformer.transform(
                 path, data, backend.mlx_args, backend.model_provider.model_key
             )
-            
+
+            if data.get("stream"):
+                so = data.setdefault("stream_options", {})
+                if isinstance(so, dict):
+                    so.setdefault("include_usage", True)
+                    mutated = True
+
             priority = data.get("priority")
             if priority is not None:
                 headers["X-MLX-Priority"] = str(priority)
@@ -238,22 +275,83 @@ async def proxy_to_mlx(
             headers=resp_headers,
         )
 
-    # SSE handling
     ct = resp_headers.get("content-type", "").lower()
-    if "text/event-stream" in ct:
+    is_sse = "text/event-stream" in ct
+    if is_sse:
         resp_headers.setdefault("Cache-Control", "no-cache")
         resp_headers["X-Accel-Buffering"] = "no"
 
     async def body_iter():
         interrupted = False
+        t_first_token: float | None = None
+        token_count = 0
+        usage_data: dict | None = None
+        non_sse_buf = bytearray() if (is_inference and not is_sse) else None
+
         try:
             async for chunk in stream.aiter_raw():
+                if is_inference:
+                    if is_sse:
+                        try:
+                            text = chunk.decode("utf-8", errors="replace")
+                            for line in text.split("\n"):
+                                stripped = line.strip()
+                                if not stripped.startswith("data: ") or stripped == "data: [DONE]":
+                                    continue
+                                try:
+                                    evt = json.loads(stripped[6:])
+                                except (json.JSONDecodeError, ValueError):
+                                    continue
+                                choices = evt.get("choices")
+                                if choices and isinstance(choices, list) and choices:
+                                    delta = choices[0].get("delta", {})
+                                    if delta.get("content"):
+                                        token_count += 1
+                                        if t_first_token is None:
+                                            t_first_token = time.monotonic()
+                                u = evt.get("usage")
+                                if isinstance(u, dict) and u.get("completion_tokens"):
+                                    usage_data = u
+                        except Exception:
+                            pass
+                    elif non_sse_buf is not None:
+                        non_sse_buf.extend(chunk)
                 yield chunk
         except httpx.HTTPError as e:
             interrupted = True
             logging.getLogger(__name__).warning("Upstream stream interrupted: %s", e)
         finally:
             await stream.aclose()
+
+            if is_inference:
+                total_elapsed = time.monotonic() - start_time
+                ttft = (t_first_token - start_time) if t_first_token is not None else None
+                prompt_toks: int | None = None
+                compl_toks = token_count
+
+                if usage_data:
+                    prompt_toks = usage_data.get("prompt_tokens")
+                    ct_val = usage_data.get("completion_tokens")
+                    if ct_val:
+                        compl_toks = ct_val
+                elif non_sse_buf:
+                    try:
+                        resp_body = json.loads(non_sse_buf)
+                        u = resp_body.get("usage")
+                        if isinstance(u, dict):
+                            prompt_toks = u.get("prompt_tokens")
+                            compl_toks = u.get("completion_tokens", 0)
+                    except (json.JSONDecodeError, ValueError):
+                        pass
+
+                if compl_toks or prompt_toks:
+                    _log_request_metrics(
+                        prompt_tokens=prompt_toks,
+                        completion_tokens=compl_toks or 0,
+                        ttft=ttft,
+                        total_time=total_elapsed,
+                    )
+
             outcome = "stream_interrupted" if interrupted else "success"
             _log_inference_audit_complete(
                 audit,

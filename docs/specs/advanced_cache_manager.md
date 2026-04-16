@@ -127,7 +127,23 @@ def insert(tokens: List[int], kv_cache: List[KVPage], priority: int):
 
 ---
 
-## 4. 실패 모드 및 운영 (Operations)
+## 4. 동적 쿨다운 및 안전 관리 (Dynamic Cooldown & Safety)
+
+### 4.1 Inference Active 판정 (Safety Window)
+캐시 축출(Eviction) 및 SSD 스왑은 Metal GPU 자원을 사용하므로, 추론 지연을 방지하기 위해 추론 종료 후 일정 시간 동안 'Active' 상태를 유지한다. 이 쿨다운 시간은 VRAM 압박 상태에 따라 동적으로 변한다.
+
+- **Normal 모드 (60s)**: VRAM 사용량이 85% 미만일 때. 사용자 독해 및 응답 간격을 충분히 보호한다.
+- **Pressure 모드 (5s)**: VRAM 사용량이 85% 이상(Soft Limit 초과)일 때. 가용 메모리 확보를 위해 최소한의 안전 마진만 남기고 즉시 축출 후보로 전환한다.
+
+### 4.2 Inference Pre-emption (선점)
+백그라운드에서 캐시 블록을 SSD로 쓰기(Swap-out) 작업 중에 신규 추론 요청이 들어올 경우:
+1. 즉시 현재 쓰기 루프를 중단(Abort)한다.
+2. VRAM에 남아있는 블록을 즉시 회수하여 신규 추론의 Prefill 공간으로 할당한다.
+3. 중단된 쓰기 작업은 이후 Idle 상태에서 재시도한다.
+
+---
+
+## 5. 실패 모드 및 운영 (Operations)
 
 - **OOM Guard (95%)**: 즉각적 503 반환 및 GC 강제 수행.
 - **Checksum Fail**: 캐시 폐기 및 원본 prefill 강제.

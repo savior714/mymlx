@@ -8,7 +8,7 @@
 
 ## §2. 범위 및 해석 기준
 
-이 문서는 `run.sh` 실행 후 메인 메뉴에서 **`2. Options`**를 선택했을 때 표시되는 **1~26번 항목 전체**를 설명한다.
+이 문서는 `run.sh` 실행 후 메인 메뉴에서 **`2. Options`**를 선택했을 때 표시되는 **1~32번 항목 전체**를 설명한다.
 
 - 기준 버전: `run.sh`의 `menu_options()` 구현
 - 목적: "옵션의 기술적 의미", "값 조절 시 기대 변화", "권장 튜닝 순서"를 운영 관점에서 정리
@@ -30,7 +30,7 @@
 
 ---
 
-## §4. 옵션 상세(1~26)
+## §4. 옵션 상세(1~32)
 
 ### 1) Host (`LISTEN_HOST`)
 - **기술 의미**: 서버 바인딩 주소(접근 범위/보안 경계 결정).
@@ -185,6 +185,62 @@
 - **기술 의미**: 24 또는 25 시나리오를 5회 반복해 min/avg/max 통계 제공.
 - **용도**: 단일 측정 편차를 줄인 운영값 결정.
 
+### 27) Speculative Decoding (`USER_SPECULATIVE_DECODING`)
+- **기술 의미**: 추측 디코딩(Speculative Decoding) 사용 여부 토글.
+- **ON 효과**: Draft(소형) 모델이 토큰 후보를 빠르게 생성하고 Target(대형) 모델이 한 번의 forward pass로 검증/수정. 코딩, 보일러플레이트 등 예측 가능한 패턴에서 생성 속도 크게 향상 가능.
+- **OFF 효과**: 표준 디코딩 사용. Continuous batching(동시 요청 배칭) 가능.
+- **주의**: ON 시 `is_batchable = False`가 설정되어 **continuous batching이 자동 비활성화**된다. 동시 다수 요청 환경에서는 처리량이 오히려 저하될 수 있다.
+- **연계 옵션**: 반드시 `28 Draft Model Path`를 함께 설정해야 동작. `29 Num Draft Tokens`로 후보 수 조절.
+
+### 28) Draft Model Path (`USER_DRAFT_MODEL`)
+- **기술 의미**: Speculative Decoding에 사용할 소형 Draft 모델 경로.
+- **입력 형식**: 로컬 절대 경로(예: `~/Desktop/models/Qwen3-1.7B-4bit`) 또는 HF Repo ID.
+- **호환성 조건**: Target 모델과 **동일한 `vocab_size`를 가진 토크나이저**를 공유해야 함. 불일치 시 생성 품질 심각히 저하.
+- **권장 크기**: Target 크기의 1/10~1/30. 예: 30B Target → 1~3B Draft(4-bit 기준 ~0.5~2GB 추가 메모리).
+- **성능 영향**: Draft 모델이 너무 크면 forward pass 비용이 높아져 이점이 감소.
+
+### 29) Num Draft Tokens (`USER_NUM_DRAFT_TOKENS`)
+- **기술 의미**: Draft 모델이 한 스텝에서 생성할 후보 토큰 수.
+- **상향(16~20) 효과**: 코딩/보일러플레이트 등 예측 가능한 패턴에서 수락률이 높아 속도 이점 극대화.
+- **하향(3~5) 효과**: 짧은 응답, 비정형 추론, 큰 Draft 모델(>7B)에서 overhead 감소.
+- **기본값**: `3`.
+- **권장 범위**: 코딩 `16~20`, 복잡 추론 `8~12`, 짧은 응답/큰 Draft `3~5`.
+
+### 30) Chat Template Args (`USER_CHAT_TEMPLATE_ARGS`)
+- **기술 의미**: 토크나이저의 `apply_chat_template`에 전달할 JSON 인자.
+- **대표 설정**: `{"enable_thinking":true}` → 모델의 reasoning/thinking 모드 활성화(Qwen3 등 지원 모델).
+- **`enable_thinking: false`**: thinking 비활성화하여 빠르고 간결한 응답.
+- **빈 값(`{}`)**: 모델 기본 템플릿 동작 유지.
+- **성능 영향**: thinking 모드 ON 시 출력 토큰 수 증가(내부 추론 토큰 포함)로 총 지연 증가 가능. 품질은 향상될 수 있음.
+- **입력 형식**: 유효한 JSON 문자열 필수. 잘못된 형식 입력 시 거부.
+
+### 31) Tool Choice Default (`USER_TOOL_CHOICE_DEFAULT`)
+- **기술 의미**: 클라이언트가 `tool_choice`를 지정하지 않았을 때 프록시 레이어에서 주입하는 기본값.
+- **`auto`(기본)**: 모델이 tool 호출 여부를 자율 판단. OpenAI API 기본 동작과 동일.
+- **`none`**: tool 호출을 하지 않고 텍스트만 생성. tools 배열이 있어도 무시.
+- **`required`**: 반드시 하나 이상의 tool을 호출. 에이전트 워크플로우에서 tool 호출을 강제할 때 사용.
+- **적용 조건**: 요청 바디에 `tools` 배열이 존재하고 `tool_choice`가 없을 때만 주입. `tools`가 없는 일반 채팅 요청에는 영향 없음.
+- **프록시 동작**: `request_transformer.py`에서 chat completion 요청을 변환할 때 `data["tool_choice"]`를 설정.
+- **CLI 플래그**: `--tool-choice-default auto|none|required`
+- **환경 변수**: `MLX_SERVER_TOOL_CHOICE_DEFAULT`
+
+### 32) MCP Config Path (`USER_MCP_CONFIG_PATH`)
+- **기술 의미**: MCP(Model Context Protocol) 설정 JSON 파일 경로. 서버가 이 파일을 `GET /v1/mlx/mcp-config` 엔드포인트로 노출하여 클라이언트 측 tool 통합을 지원.
+- **설정 시 효과**: 클라이언트(Cursor, Continue, 커스텀 에이전트 등)가 해당 엔드포인트를 조회하여 MCP 서버 목록/도구 정보를 자동으로 가져갈 수 있음.
+- **미설정 시**: 엔드포인트가 `configured: false`를 반환.
+- **입력 형식**: 파일 경로 (예: `~/.mcp.json`, `~/projects/my-agent/.mcp.json`). `~`는 자동 확장.
+- **유효성 검증**: 파일 존재 여부를 TUI에서 경고(존재하지 않아도 설정 가능). API 호출 시 JSON 파싱 실패는 422 응답.
+- **CLI 플래그**: `--mcp-config-path PATH`
+- **환경 변수**: `MLX_SERVER_MCP_CONFIG_PATH`
+- **API 응답 예시**:
+  ```json
+  {
+    "configured": true,
+    "path": "/Users/user/.mcp.json",
+    "config": { "mcpServers": { ... } }
+  }
+  ```
+
 ---
 
 ## §5. 실전 튜닝 시나리오
@@ -203,7 +259,15 @@
 4. `16 Advanced Cache=ON`, `21 Prompt Normalize=ON`
 5. `24/25/26`으로 수치 재검증
 
-### 시나리오 C: 응답 품질 저하가 체감됨
+### 시나리오 C: Speculative Decoding으로 단일 요청 속도 극대화
+1. `27 Speculative Decoding` ON
+2. `28 Draft Model Path`에 Target과 동일 계열 소형 모델 설정 (예: Qwen3-1.7B-4bit)
+3. `29 Num Draft Tokens`를 `16`으로 시작 (코딩 워크로드 기준)
+4. `10 Decode Concurrency`는 `1`로 제한 (배칭 불가이므로 무의미)
+5. 로그에서 수락률(α) 확인 → α < 0.5이면 Num Draft Tokens 하향 또는 Draft 모델 교체
+6. 다수 동시 요청이 필요하면 OFF로 전환하고 decode concurrency 복원
+
+### 시나리오 D: 응답 품질 저하가 체감됨
 1. `18 KV Cache Bits`를 8bit 또는 Off로 상향
 2. `19 KV Group Size`를 더 작게
 3. 샘플링(`3/5/6`)을 보수적으로 재설정
@@ -245,6 +309,8 @@
 - `21 Prompt Normalize`: `ON`
 - `22 Cache Observability`: `OFF` (성능 운영 기준)
 - `23 Cache Headroom`: `0.78`
+- `27 Speculative Decoding`: `OFF` (동시 요청 배칭 우선)
+- `30 Chat Template Args`: `{}` (기본 템플릿)
 
 **의도**:
 - **OS/백그라운드 앱 여유를 남기면서도** Q4 모델 운용 안정성을 우선 확보한다.

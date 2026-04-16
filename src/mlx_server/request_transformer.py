@@ -106,7 +106,15 @@ class MlxRequestTransformer:
             MlxRequestTransformer.normalize_chat_messages(data)
             mutated = True
 
-        # 3. Prompt Normalization
+        # 3. Tool Choice Default
+        if path in ("/v1/chat/completions", "/chat/completions"):
+            if "tools" in data and "tool_choice" not in data:
+                tc_default = getattr(backend_args, "tool_choice_default", "auto")
+                if tc_default and tc_default != "auto":
+                    data["tool_choice"] = tc_default
+                    mutated = True
+
+        # 4. Prompt Normalization
         if getattr(backend_args, "prompt_normalization", False):
             pre_len, post_len = MlxRequestTransformer.normalize_prompt_payload(data)
             if pre_len != post_len:

@@ -162,6 +162,42 @@ async def remote_models_route(request: Request) -> JSONResponse:
         return JSONResponse({"detail": str(e)}, status_code=500)
     return JSONResponse({"results": results})
 
+async def mcp_config_route(request: Request) -> JSONResponse:
+    """Serve the MCP configuration JSON for client-side tool integration."""
+    backend: MlxBackend = request.app.state.backend
+    config_path = getattr(backend.mlx_args, "mcp_config_path", None)
+
+    if not config_path:
+        return JSONResponse(
+            {"configured": False, "detail": "No MCP config path configured. Set --mcp-config-path."},
+            status_code=200,
+        )
+
+    p = Path(config_path).expanduser().resolve()
+    if not p.is_file():
+        return JSONResponse(
+            {"configured": True, "path": str(p), "detail": f"File not found: {p}"},
+            status_code=404,
+        )
+
+    try:
+        raw = p.read_text(encoding="utf-8")
+        data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        return JSONResponse(
+            {"configured": True, "path": str(p), "detail": f"Invalid JSON: {e}"},
+            status_code=422,
+        )
+    except OSError as e:
+        logger.exception("Failed to read MCP config")
+        return JSONResponse(
+            {"configured": True, "path": str(p), "detail": str(e)},
+            status_code=500,
+        )
+
+    return JSONResponse({"configured": True, "path": str(p), "config": data})
+
+
 async def proxy_route(request: Request) -> Response:
     backend: MlxBackend = request.app.state.backend
     client: httpx.AsyncClient = request.app.state.http_client

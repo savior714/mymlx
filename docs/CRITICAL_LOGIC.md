@@ -161,6 +161,20 @@
 - **Rationale**: 명확한 불변식과 환경 인지형(Environment-aware) 캐시 키를 정의함으로써, 어떤 복잡한 설정 변화나 메모리 압박 상황에서도 데이터 오염 없는 결정적 성능을 제공하기 위함.
 - **증적**: `docs/specs/advanced_cache_manager.md`, `docs/plans/archive/20260415_integrate_implementation_spec_v1.md`.
 
+### 2026-04-16: Speculative Decoding 수락률(α) 관측 — Module-level Monkey-patch 채택
+
+- **Context**: Speculative decoding의 실효성을 평가하려면 수락률(α = accepted/total) 메트릭이 필요하다. mlx-lm 0.31.2의 `GenerationResponse.from_draft` 필드는 Python API에서만 접근 가능하며, 업스트림 `APIHandler`는 이를 HTTP 응답에 포함하지 않는다.
+- **대안 분석**:
+  1. **업스트림 APIHandler 수정**: `from_draft`를 SSE 이벤트/응답 JSON에 추가. 업스트림 호환성 파괴, 유지보수 비용 높음.
+  2. **Module-level monkey-patch**: `_mlx_server_mod.stream_generate`를 래핑하여 `from_draft` 카운터를 수집하고 요청 완료 시 로그 출력. 기존 `_patch_kv_quantization`과 동일 패턴. 업스트림 코드 무변경.
+  3. **미구현(문서만)**: 관측 없이 스펙에만 기록. 운영 중 실효성 판단 불가.
+- **Decision**: **대안 2(Module-level monkey-patch)** 채택.
+  - `backend.py`의 `_patch_speculative_observability()`가 `stream_generate`를 래핑.
+  - `draft_model`이 `None`이 아닌 생성 호출에서만 `from_draft` 카운팅 활성화.
+  - 요청 완료 시 `INFO` 레벨로 `accepted/total (α=X.XX)` 출력.
+- **Rationale**: `_patch_kv_quantization`과 동일한 검증된 패턴을 사용하여 업스트림 무변경 원칙을 지키면서, 운영자에게 `num_draft_tokens` 튜닝 근거를 제공.
+- **증적**: `src/mlx_server/backend.py`, `docs/specs/speculative_decoding.md`.
+
 ---
 <footer>
 이 문서는 아키텍처의 중대한 변화가 있을 때마다 갱신되며, `specs/`의 기술적 사양과 상호 참조됩니다.

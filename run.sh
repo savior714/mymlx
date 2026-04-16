@@ -41,6 +41,12 @@ USER_CACHE_GRACE_SECONDS=""
 USER_PROMPT_NORMALIZATION="false"
 USER_CACHE_OBSERVABILITY="false"
 USER_CACHE_HEADROOM_RATIO=""
+USER_SPECULATIVE_DECODING="false"
+USER_DRAFT_MODEL=""
+USER_NUM_DRAFT_TOKENS=""
+USER_CHAT_TEMPLATE_ARGS=""
+USER_TOOL_CHOICE_DEFAULT="auto"
+USER_MCP_CONFIG_PATH=""
 USER_MODELS_ROOT="$DEFAULT_MODELS_ROOT"
 
 is_int() {
@@ -532,6 +538,12 @@ save_config() {
         echo "USER_PROMPT_NORMALIZATION=\"$USER_PROMPT_NORMALIZATION\""
         echo "USER_CACHE_OBSERVABILITY=\"$USER_CACHE_OBSERVABILITY\""
         echo "USER_CACHE_HEADROOM_RATIO=\"$USER_CACHE_HEADROOM_RATIO\""
+        echo "USER_SPECULATIVE_DECODING=\"$USER_SPECULATIVE_DECODING\""
+        echo "USER_DRAFT_MODEL=\"$USER_DRAFT_MODEL\""
+        echo "USER_NUM_DRAFT_TOKENS=\"$USER_NUM_DRAFT_TOKENS\""
+        echo "USER_CHAT_TEMPLATE_ARGS=\"$USER_CHAT_TEMPLATE_ARGS\""
+        echo "USER_TOOL_CHOICE_DEFAULT=\"$USER_TOOL_CHOICE_DEFAULT\""
+        echo "USER_MCP_CONFIG_PATH=\"$USER_MCP_CONFIG_PATH\""
         echo "USER_MODELS_ROOT=\"$USER_MODELS_ROOT\""
     } > "$CONFIG_FILE"
 }
@@ -636,6 +648,15 @@ start_server() {
     [[ "$USER_PROMPT_NORMALIZATION" == "true" ]] && ARGS+=(--prompt-normalization)
     [[ "$USER_CACHE_OBSERVABILITY" == "true" ]] && ARGS+=(--cache-observability)
     [[ -n "$USER_CACHE_HEADROOM_RATIO" ]] && ARGS+=(--cache-headroom-ratio "$USER_CACHE_HEADROOM_RATIO")
+
+    if [[ "$USER_SPECULATIVE_DECODING" == "true" && -n "$USER_DRAFT_MODEL" ]]; then
+        ARGS+=(--draft-model "$USER_DRAFT_MODEL")
+        [[ -n "$USER_NUM_DRAFT_TOKENS" ]] && ARGS+=(--num-draft-tokens "$USER_NUM_DRAFT_TOKENS")
+    fi
+
+    [[ -n "$USER_CHAT_TEMPLATE_ARGS" ]] && ARGS+=(--chat-template-args "$USER_CHAT_TEMPLATE_ARGS")
+    [[ -n "$USER_TOOL_CHOICE_DEFAULT" && "$USER_TOOL_CHOICE_DEFAULT" != "auto" ]] && ARGS+=(--tool-choice-default "$USER_TOOL_CHOICE_DEFAULT")
+    [[ -n "$USER_MCP_CONFIG_PATH" ]] && ARGS+=(--mcp-config-path "$USER_MCP_CONFIG_PATH")
 
     echo "Models Root: $models_root"
     echo "Command: MLX_SERVER_LOCAL_MODELS_ROOT=\"$models_root\" uv run mlx-server ${ARGS[*]}"
@@ -745,9 +766,18 @@ menu_options() {
         printf " %2d. Stream TPS Compare: %-15s (정의: Decode TPS vs E2E TPS 분리 측정)\n" 25 "Run"
         printf " %2d. 5x Summary Bench:   %-15s (정의: 24/25 기준 5회 반복 통계)\n" 26 "Run"
         echo "----------------------------------------------------------------------"
+        echo " ── Speculative Decoding & Advanced ──"
+        printf " %2d. Speculative Decode: %-15s (추측 디코딩: ON=Draft 모델로 속도↑ / OFF=표준 생성 | 배칭 불가)\n" 27 "$USER_SPECULATIVE_DECODING"
+        printf " %2d. Draft Model Path:  %-15s (Draft 모델 경로: 로컬 절대경로 또는 HF Repo ID)\n" 28 "${USER_DRAFT_MODEL:-None}"
+        printf " %2d. Num Draft Tokens:  %-15s (Draft 토큰 수: ↑수락률 높은 패턴에 유리 / ↓오버헤드 감소)\n" 29 "${USER_NUM_DRAFT_TOKENS:-3}"
+        printf " %2d. Chat Template Args:%-15s (채팅 템플릿 인자: enable_thinking 등 JSON)\n" 30 "${USER_CHAT_TEMPLATE_ARGS:-'{}'}"
+        echo " ── Tool Integration ──"
+        printf " %2d. Tool Choice Default:%-14s (tool_choice 기본값: auto=모델판단 / none / required)\n" 31 "$USER_TOOL_CHOICE_DEFAULT"
+        printf " %2d. MCP Config Path:   %-15s (MCP 설정 JSON 경로: 클라이언트 tool 통합용)\n" 32 "${USER_MCP_CONFIG_PATH:-None}"
+        echo "----------------------------------------------------------------------"
         echo " B. Back to Main Menu"
         echo "----------------------------------------------------------------------"
-        read -p "Select option to edit [1-26, B]: " opt
+        read -p "Select option to edit [1-32, B]: " opt
 
         case "$opt" in
             1)
@@ -963,10 +993,109 @@ menu_options() {
             26)
                 run_repeat_benchmark_5x
                 ;;
+            27)
+                toggle_speculative_decoding
+                echo "Speculative Decoding: $USER_SPECULATIVE_DECODING"
+                echo "  - 정의: Draft(소형) 모델이 토큰 후보를 빠르게 생성하고 Target(대형) 모델이 검증"
+                echo "  - ON 효과: 생성 속도 향상 가능 (코딩 등 예측 가능한 패턴에서 특히 효과적)"
+                echo "  - OFF 효과: 표준 디코딩, continuous batching 가능"
+                echo "  - ⚠ ON 시 continuous batching(동시 요청 배칭)은 자동 비활성화됩니다"
+                if [[ "$USER_SPECULATIVE_DECODING" == "true" && -z "$USER_DRAFT_MODEL" ]]; then
+                    echo "  ⚠ Draft Model Path가 설정되지 않았습니다. 28번에서 설정하세요."
+                fi
+                sleep 1
+                ;;
+            28)
+                echo "Draft Model Path Guide:"
+                echo "  - 정의: Speculative Decoding에 사용할 소형 Draft 모델 경로"
+                echo "  - 로컬 경로 예: ~/Desktop/models/Qwen3-1.7B-4bit"
+                echo "  - HF Repo ID 예: mlx-community/Qwen3-1.7B-4bit"
+                echo "  - 주의: Target 모델과 동일한 토크나이저(vocab_size)를 공유해야 합니다"
+                echo "  - 권장: Target 크기의 1/10~1/30 크기 (예: 30B Target → 1~3B Draft)"
+                read -p "Draft Model Path [${USER_DRAFT_MODEL:-None}]: " input
+                if [[ -n "$input" ]]; then
+                    USER_DRAFT_MODEL="$input"
+                fi
+                ;;
+            29)
+                echo "Num Draft Tokens Guide:"
+                echo "  - 정의: Draft 모델이 한 번에 생성할 후보 토큰 수"
+                echo "  - 상향(16~20): 코딩/보일러플레이트 등 예측 가능한 패턴에서 효과적"
+                echo "  - 하향(3~5): 짧은 응답이나 큰 Draft 모델(>7B)일 때 적합"
+                echo "  - 권장 범위: 코딩 16~20, 추론 8~12, 짧은 응답 3~5"
+                read -p "Num Draft Tokens [${USER_NUM_DRAFT_TOKENS:-3}]: " input
+                set_if_valid_int_range "$input" 1 64 USER_NUM_DRAFT_TOKENS "Num Draft Tokens"
+                ;;
+            30)
+                echo "Chat Template Args Guide:"
+                echo "  - 정의: 토크나이저 apply_chat_template에 전달할 JSON 인자"
+                echo "  - 예: {\"enable_thinking\":true}  → 모델 reasoning/thinking 모드 활성화"
+                echo "  - 예: {\"enable_thinking\":false} → thinking 비활성화 (빠른 응답)"
+                echo "  - 빈 값: 기본 템플릿 동작 유지"
+                echo "  - 현재: ${USER_CHAT_TEMPLATE_ARGS:-'{}'}"
+                read -p "Chat Template Args (JSON): " input
+                if [[ -n "$input" ]]; then
+                    if python3 -c "import json; json.loads('$input')" 2>/dev/null; then
+                        USER_CHAT_TEMPLATE_ARGS="$input"
+                    else
+                        echo "❌ 유효한 JSON 형식이 아닙니다. 예: {\"enable_thinking\":true}"
+                        sleep 1
+                    fi
+                fi
+                ;;
+            31)
+                echo "Tool Choice Default Guide:"
+                echo "  - 정의: 클라이언트가 tool_choice를 지정하지 않았을 때 서버가 주입할 기본값"
+                echo "  - auto: 모델이 tool 호출 여부를 자율 판단 (OpenAI 기본값)"
+                echo "  - none: tool 호출을 하지 않고 텍스트만 생성"
+                echo "  - required: 반드시 tool을 호출 (tool이 없으면 에러)"
+                echo "  - 주의: 요청에 tools 배열이 있을 때만 적용됩니다"
+                echo "  현재: $USER_TOOL_CHOICE_DEFAULT"
+                echo ""
+                echo "  1. auto     (모델 자율 판단 — 권장)"
+                echo "  2. none     (tool 호출 비활성화)"
+                echo "  3. required (tool 호출 강제)"
+                read -p "Select [1-3]: " input
+                case "$input" in
+                    1) USER_TOOL_CHOICE_DEFAULT="auto" ;;
+                    2) USER_TOOL_CHOICE_DEFAULT="none" ;;
+                    3) USER_TOOL_CHOICE_DEFAULT="required" ;;
+                esac
+                ;;
+            32)
+                echo "MCP Config Path Guide:"
+                echo "  - 정의: MCP(Model Context Protocol) 설정 JSON 파일 경로"
+                echo "  - 용도: 서버가 GET /v1/mlx/mcp-config 엔드포인트로 설정을 노출"
+                echo "  - 클라이언트(Cursor, Continue 등)가 이 엔드포인트를 조회하여 tool 서버 목록을 가져감"
+                echo "  - 예: ~/.mcp.json, ~/projects/.mcp.json"
+                echo "  - 빈 값: MCP config 엔드포인트 비활성"
+                read -p "MCP Config Path [${USER_MCP_CONFIG_PATH:-None}]: " input
+                if [[ -n "$input" ]]; then
+                    local expanded="${input/#\~/$HOME}"
+                    if [[ -f "$expanded" ]]; then
+                        USER_MCP_CONFIG_PATH="$input"
+                        echo "✅ MCP Config 설정 완료: $input"
+                    else
+                        echo "⚠ 파일이 존재하지 않습니다: $expanded"
+                        read -p "그래도 설정하시겠습니까? [y/N]: " confirm
+                        if [[ "$confirm" =~ ^[Yy]$ ]]; then
+                            USER_MCP_CONFIG_PATH="$input"
+                        fi
+                    fi
+                fi
+                ;;
             [Bb]) save_config; return ;;
             *) echo "Invalid selection."; sleep 1 ;;
         esac
     done
+}
+
+toggle_speculative_decoding() {
+    if [[ "$USER_SPECULATIVE_DECODING" == "true" ]]; then
+        USER_SPECULATIVE_DECODING="false"
+    else
+        USER_SPECULATIVE_DECODING="true"
+    fi
 }
 
 toggle_prompt_normalization() {

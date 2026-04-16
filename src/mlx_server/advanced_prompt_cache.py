@@ -37,6 +37,11 @@ class AdvancedPromptCache(AdvancedPromptCacheEvictionMixin, SafeguardPromptCache
     _SSD_WRITE_THRESHOLD_MIN = 1
     _SSD_WRITE_THRESHOLD_MAX = 4
 
+    # Dynamic Cooldown Thresholds (Deep Research 기반)
+    _VRAM_PRESSURE_THRESHOLD = 0.85
+    _COOLDOWN_NORMAL = 60.0    # User reading/thinking time
+    _COOLDOWN_PRESSURE = 5.0   # Aggressive reclamation under pressure
+
     def __init__(
         self,
         page_size: int = 128,
@@ -75,7 +80,6 @@ class AdvancedPromptCache(AdvancedPromptCacheEvictionMixin, SafeguardPromptCache
         self._cache_lock = threading.Lock()
 
         self._last_inference_time: float = 0.0
-        self._INFERENCE_COOLDOWN = 30.0
 
         # Explicit inference-active tracking to prevent Metal encoder contention.
         # Event is SET when no inference is running (safe for background GPU work).
@@ -133,11 +137,19 @@ class AdvancedPromptCache(AdvancedPromptCacheEvictionMixin, SafeguardPromptCache
             if self._active_inference_count == 0:
                 self._inference_event.set()
 
+    def _get_current_cooldown(self) -> float:
+        """Calculate dynamic cooldown based on current memory pressure."""
+        ratio = self.pressure_manager.get_usage_ratio()
+        if ratio >= self._VRAM_PRESSURE_THRESHOLD:
+            return self._COOLDOWN_PRESSURE
+        return self._COOLDOWN_NORMAL
+
     def _is_inference_active(self) -> bool:
         """True if inference is explicitly running OR was active recently."""
         if not self._inference_event.is_set():
             return True
-        return (time.time() - self._last_inference_time) < self._INFERENCE_COOLDOWN
+        cooldown = self._get_current_cooldown()
+        return (time.time() - self._last_inference_time) < cooldown
 
     def _background_maintenance(self):
         """Periodically check memory and evict proactively to maintain headroom."""
@@ -159,7 +171,7 @@ class AdvancedPromptCache(AdvancedPromptCacheEvictionMixin, SafeguardPromptCache
         evicted = 0
         
         # Get candidates sorted by value (prio, age)
-        candidates = self.index.get_vram_candidates(sort_by_priority=True)
+        candidates = self.index.get_eviction_candidates()
 
         for h in candidates:
             if self._is_inference_active():
@@ -455,6 +467,11 @@ class AdvancedPromptCache(AdvancedPromptCacheEvictionMixin, SafeguardPromptCache
             "last_miss_reason": last_miss_reason,
             "memory_pressure": self.pressure_manager.get_stats(),
             "disk_cache": self.persistent_layer.get_disk_stats(),
+            "dynamic_cooldown": {
+                "current_mode": "Pressure (5s)" if self.pressure_manager.get_usage_ratio() >= self._VRAM_PRESSURE_THRESHOLD else "Normal (60s)",
+                "last_inference_time": self._last_inference_time,
+                "idle_seconds": time.time() - self._last_inference_time if self._last_inference_time > 0 else 0,
+            }
         })
         return stats
 
