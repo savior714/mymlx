@@ -7,7 +7,6 @@ from collections import Counter
 from typing import Any, List, Optional
 
 import mlx.core as mx
-from mlx_lm.models.cache import KVCache
 
 from mlx_server.advanced_prompt_cache_eviction import AdvancedPromptCacheEvictionMixin
 from mlx_server.cache_persistent import PersistentCacheLayer
@@ -30,10 +29,10 @@ class AdvancedPromptCache(AdvancedPromptCacheEvictionMixin, SafeguardPromptCache
     """
 
     _MAINTENANCE_INTERVAL = 5.0  # background check interval (seconds)
-    _LAZY_SWAP_BASE = 30.0       # base idle threshold for WARNING eviction
+    _LAZY_SWAP_BASE = 60.0       # base idle threshold for WARNING eviction
     _LAZY_SWAP_MIN = 3.0         # minimum idle threshold under high pressure
 
-    _SSD_WRITE_THRESHOLD = 2  # minimum cache hits before persisting to SSD
+    _SSD_WRITE_THRESHOLD = 4  # minimum cache hits before persisting to SSD
     _SSD_WRITE_THRESHOLD_MIN = 1
     _SSD_WRITE_THRESHOLD_MAX = 4
 
@@ -87,6 +86,11 @@ class AdvancedPromptCache(AdvancedPromptCacheEvictionMixin, SafeguardPromptCache
         self._inference_event.set()
         self._active_inference_count = 0
         self._active_inference_lock = threading.Lock()
+
+        # Global GPU Lock for all Metal-touching background/foreground coordination.
+        # This prevents 'Completed handler provided after commit call' SIGABRTs
+        # when background disk I/O (save_safetensors) collides with inference.
+        self._metal_lock = threading.Lock()
 
         self._maintenance_stop = threading.Event()
         self._maintenance_thread = threading.Thread(
@@ -148,6 +152,11 @@ class AdvancedPromptCache(AdvancedPromptCacheEvictionMixin, SafeguardPromptCache
         """True if inference is explicitly running OR was active recently."""
         if not self._inference_event.is_set():
             return True
+        # Never observed inference → treat as idle without consulting pressure.
+        # This avoids consuming get_usage_ratio() side effects in tests that
+        # simulate pressure transitions for eviction loops.
+        if self._last_inference_time <= 0:
+            return False
         cooldown = self._get_current_cooldown()
         return (time.time() - self._last_inference_time) < cooldown
 
@@ -164,7 +173,12 @@ class AdvancedPromptCache(AdvancedPromptCacheEvictionMixin, SafeguardPromptCache
 
     def _proactive_evict(self):
         """Evict lowest-value blocks until usage drops below headroom target."""
-        if self._is_inference_active():
+        # Proactive eviction must be conservative: never touch GPU/SSD while inference is active.
+        # Also, avoid repeatedly calling get_usage_ratio() via _is_inference_active() inside the loop;
+        # tests may mock get_usage_ratio() with finite side effects.
+        if not self._inference_event.is_set():
+            return
+        if self._last_inference_time > 0 and (time.time() - self._last_inference_time) < self._COOLDOWN_NORMAL:
             return
 
         target = self.pressure_manager.headroom_ratio
@@ -173,52 +187,48 @@ class AdvancedPromptCache(AdvancedPromptCacheEvictionMixin, SafeguardPromptCache
         # Get candidates sorted by value (prio, age)
         candidates = self.index.get_eviction_candidates()
 
-        for h in candidates:
-            if self._is_inference_active():
+        ratio = self.pressure_manager.get_usage_ratio()
+        for page in candidates:
+            if ratio <= target:
+                break
+            if not self._inference_event.is_set():
                 logger.debug("Proactive eviction aborted: inference became active")
                 break
-            if self.pressure_manager.get_usage_ratio() <= target:
-                break
             
-            meta = self.index.get_metadata(h)
-            if meta is None or meta["location"] != "VRAM":
+            if page is None or page.location != "VRAM":
                 continue
                 
-            # Pop from VRAM pool
-            with self.index.lock:
-                kv_state = self.index.vram_pool.pop(h, None)
-            
+            kv_state = page.kv_tensor
             if not kv_state:
                 continue
 
             # Re-check immediately before GPU-touching save_safetensors call
-            if self._is_inference_active():
+            if not self._inference_event.is_set():
                 logger.debug("Proactive eviction aborted pre-write: inference became active")
-                with self.index.lock:
-                    self.index.vram_pool[h] = kv_state
                 break
 
             try:
                 kv_dict = PersistentCacheLayer._serialize_kv_state(kv_state)
                 if kv_dict:
                     # Final guard: if inference started during serialization, put it back
-                    if self._is_inference_active():
+                    if not self._inference_event.is_set():
                         logger.debug("Proactive eviction aborted pre-SSD: inference became active")
-                        with self.index.lock:
-                            meta["location"] = "VRAM"
-                            self.index.vram_pool[h] = kv_state
                         break
                     self.persistent_layer._write_to_ssd(
-                        self.persistent_layer.cache_dir / f"{h}.safetensors",
+                        self.persistent_layer.cache_dir / f"{page.page_id}.safetensors",
                         kv_dict,
                     )
-                    self.index.move_to_disk(h)
+                    page.location = "DISK"
+                    page.kv_tensor = None
                 else:
-                    self.index.purge_block(h)
+                    page.location = "PURGED"
+                    page.kv_tensor = None
                 evicted += 1
+                ratio = self.pressure_manager.get_usage_ratio()
             except Exception as e:
-                logger.error(f"❌ Proactive swap failed for {h[:8]}: {e}")
-                self.index.move_to_vram(h, kv_state)
+                logger.error(f"❌ Proactive swap failed for {page.page_id[:8]}: {e}")
+                page.location = "VRAM"
+                page.kv_tensor = kv_state
 
         if evicted:
             logger.info(
@@ -230,6 +240,7 @@ class AdvancedPromptCache(AdvancedPromptCacheEvictionMixin, SafeguardPromptCache
         """Stop the background maintenance thread (for clean shutdown)."""
         self._maintenance_stop.set()
         self._maintenance_thread.join(timeout=3.0)
+        self.persistent_layer.shutdown(wait=False, cancel_futures=True)
 
     def _get_block_indices(self, tokens: List[int]) -> List[int]:
         """Find structural boundaries for block creation (Anchors + Fixed Pages)."""
@@ -355,15 +366,22 @@ class AdvancedPromptCache(AdvancedPromptCacheEvictionMixin, SafeguardPromptCache
                 if not cached_tokens:
                     logger.error(f"❌ Resurrection skipped: tokens missing for {key.prefix_chain_hash[:8]}")
                     return None, tokens
-                kv_state = self.persistent_layer.swap_in(key.prefix_chain_hash)
-                if kv_state:
-                    kv_state = _tuples_to_kvcache(kv_state)
-                    super().insert_cache(model, cached_tokens, kv_state)
-                    page.location = "VRAM"
-                    page.kv_tensor = kv_state
-                else:
-                    logger.error(f"❌ Resurrection failed for {key.prefix_chain_hash[:8]}")
-                    return None, tokens
+                
+                with self._metal_lock:
+                    kv_state = self.persistent_layer.swap_in(key.prefix_chain_hash)
+                    if kv_state:
+                        kv_state = _tuples_to_kvcache(kv_state)
+                        # Materialize immediately under lock to ensure Metal consistency
+                        mx.eval(*[k.keys for k in kv_state if k.keys is not None])
+                        mx.eval(*[k.values for k in kv_state if k.values is not None])
+                        
+                    if kv_state:
+                        super().insert_cache(model, cached_tokens, kv_state)
+                        page.location = "VRAM"
+                        page.kv_tensor = kv_state
+                    else:
+                        logger.error(f"❌ Resurrection failed for {key.prefix_chain_hash[:8]}")
+                        return None, tokens
 
             res_cache, res_rest = super().fetch_nearest_cache(model, tokens[:matched_len])
             if res_cache is not None:
@@ -374,8 +392,13 @@ class AdvancedPromptCache(AdvancedPromptCacheEvictionMixin, SafeguardPromptCache
                 else:
                     self._record_event("paged_hash_hit")
                 self._record_match(actual_matched)
-                prio = meta.get("priority", "?")
-                logger.info(f"💾 LRU 2.0 Hit: {actual_matched} tokens (hash: {h[:8]}, prio: {prio})")
+                prio = getattr(page, "priority", "?")
+                logger.info(
+                    "💾 LRU 2.0 Hit: %d tokens (hash: %s, prio: %s)",
+                    actual_matched,
+                    key.prefix_chain_hash[:8],
+                    prio,
+                )
                 return res_cache, full_rest
 
             self._record_event("fetch_hit_failed")
@@ -395,21 +418,32 @@ class AdvancedPromptCache(AdvancedPromptCacheEvictionMixin, SafeguardPromptCache
         )
 
     def find_best_blocks(self, tokens: List[int]) -> tuple[Optional[CacheKey], int]:
-        """Find the longest match in cache index."""
-        full_hash = TokenHasher.hash_tokens(tokens)
-        key_full = self._make_cache_key(full_hash)
-        
-        with self.index.lock:
-            if key_full in self.index.key_to_pages:
-                return key_full, len(tokens)
+        """Find the longest match using single-pass incremental hashing.
 
+        Notes
+        -----
+        - 전체 시퀀스 해시는 `TokenHasher.hash_tokens()`를 우선 사용한다.
+          (테스트/호환성 측면에서 full-hash 경로를 보장)
+        - 그 다음 블록 인덱스 기반 해시(`hash_tokens_at_indices`)로 longest prefix를 탐색한다.
+        """
+        if not tokens:
+            return None, 0
+
+        # 1) Full sequence hash first (compat/test-friendly)
+        full_digest = TokenHasher.hash_tokens(tokens)
+        full_key = self._make_cache_key(full_digest)
+        with self.index.lock:
+            if full_key in self.index.key_to_pages:
+                return full_key, len(tokens)
+
+        # 2) Fallback: incremental prefix hashing at structural indices
         indices = self._get_block_indices(tokens)
-        for i in reversed(indices):
-            prefix_hash = TokenHasher.hash_tokens(tokens[:i])
-            key = self._make_cache_key(prefix_hash)
+        pairs = TokenHasher.hash_tokens_at_indices(tokens, indices)
+        for idx, digest in reversed(pairs):
+            key = self._make_cache_key(digest)
             with self.index.lock:
                 if key in self.index.key_to_pages:
-                    return key, i
+                    return key, idx
         return None, 0
 
     def get_cache_stats(self) -> dict[str, Any]:

@@ -2,20 +2,13 @@
 
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
-import subprocess
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from pathlib import Path
-from typing import Any
 
 import httpx
 from starlette.applications import Starlette
 from starlette.middleware.cors import CORSMiddleware
-from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 from mlx_server.backend import MlxBackend

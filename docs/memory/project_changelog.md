@@ -1,4 +1,16 @@
-# Project Changelog
+### [2026-04-17]
+- **[Fix]** `run.sh` 내 메인 루프에서 모든 설정값이 강제로 초기화(reset)되는 중대 버그를 수정했습니다. 이제 `~/.mlx-server/config`의 설정이 정상적으로 유지됩니다.
+- **[Fix]** Metal Command Buffer 충돌 방지 및 인퍼런스 트래킹 강화:
+    - `AdvancedPromptCache` 내 글로벌 `_metal_lock` 도입 — 백그라운드 SSD Swap과 추론 루프 간 상호 배제 보장.
+    - `ResponseGenerator.generate` 패치를 통한 정밀한 Inference Tracking 구현 — 토큰 생성 전체 과정 중 백그라운드 간섭 차단.
+    - SSD에서 로드된(Resurrected) 텐서의 즉각적 구체화(`mx.eval`)를 통한 레이스 컨디션 해결.
+    - Metal Assertion Fail (`Completed handler provided after commit call`) 이슈 해결.
+- **[Stability]** Qwen3-Next 등 대형 모델 사용 시 OOM 방지를 위한 안정성 강화:
+    - `Advanced Cache` 기본 활성화 (Proactive Eviction 지원).
+    - `USER_METAL_MEMORY_LIMIT` 96GB(75% 수준), `USER_PROMPT_CACHE_BYTES` 16GB로 안정화 조정.
+    - `USER_MAX` (Max Tokens)를 65,536에서 32,768로 조정하여 피크 메모리 압력 완화.
+- **[UX]** `run.sh` 종료 코드(137, 139, 134) 발생 시 원인 분석 및 해결책(양자화, 메모리 제한 등)을 구체적으로 안내하도록 개선했습니다.
+- **[Plan]** `docs/plans/20260417_fix_oom_stability.md` 플랜 수립 및 구현 완료.
 
 ### [2026-04-13]
 - **[Proxy]** `/v1/embeddings`를 의도된 미지원 엔드포인트로 고정하고, `501` + OpenAI 형식 에러 JSON(`embeddings_not_supported`)을 반환하도록 변경했습니다. 또한 업스트림 `4xx/5xx` 응답을 스트리밍 중계하지 않고 버퍼링 반환하도록 조정하여 `httpx.ReadError` 기반 ASGI 예외 로그를 제거했습니다.

@@ -20,3 +20,5 @@ server.log
 # verify.sh artifacts (local machine-readable reports)
 verify-last-result.json
 verify-pytest-failures.txt
+verify-ruff-failures.txt
+verify-ty-failures.txt

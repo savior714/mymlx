@@ -175,6 +175,16 @@
 - **Rationale**: `_patch_kv_quantization`과 동일한 검증된 패턴을 사용하여 업스트림 무변경 원칙을 지키면서, 운영자에게 `num_draft_tokens` 튜닝 근거를 제공.
 - **증적**: `src/mlx_server/backend.py`, `docs/specs/speculative_decoding.md`.
 
+### 2026-04-17: Metal Command Buffer 동기화 — Global Metal Lock 및 Inference Tracking 강화
+
+- **Context**: LRU 2.0의 백그라운드 유지보수(SSD Swap)와 메인 추론 루프가 동시에 Metal API를 호출할 때 `Completed handler provided after commit call` (SIGABRT) 충돌이 발생. 특히 토큰 생성(generation) 과정이 길어질 경우 백그라운드 스레드가 추론 비활성 상태로 오판할 위험이 있음.
+- **Decision**: 
+  1. **Global Metal Lock**: `AdvancedPromptCache` 내에 `_metal_lock`을 도입하여 `mx.save_safetensors`, `mx.load`, `mx.clear_cache` 등 Metal 리소스를 직접 건드리는 모든 작업을 상호 배제 처리함.
+  2. **ResponseGenerator Wrapping**: `backend.py`에서 `ResponseGenerator.generate`를 패치하여, 반환된 제너레이터가 완전히 소모될 때까지 `prompt_cache`의 인퍼런스 활성 상태(`_active_inference_count`)를 유지하도록 함.
+  3. **Materialization Integrity**: DISK에서 로드된 텐서는 Lock을 해제하기 전 `mx.eval()`을 통해 즉시 구체화하여 메인 스레드 사용 시점의 레이스 컨디션을 원천 차단함.
+- **Rationale**: 멀티스레드 환경에서 MLX/Metal의 비동기 커맨드 버퍼 제출(submission) 순서 정합성을 보장하고, 대용량 컨텍스트(80k+) 처리 시의 치명적 시스템 크래시를 방지하여 서버급 안정성을 확보하기 위함.
+- **증적**: `src/mlx_server/advanced_prompt_cache.py`, `src/mlx_server/backend.py`, `src/mlx_server/advanced_prompt_cache_eviction.py`.
+
 ---
 <footer>
 이 문서는 아키텍처의 중대한 변화가 있을 때마다 갱신되며, `specs/`의 기술적 사양과 상호 참조됩니다.

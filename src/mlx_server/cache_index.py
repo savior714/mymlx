@@ -1,9 +1,8 @@
 import logging
 import threading
 import time
-from collections import Counter
 from dataclasses import dataclass, field
-from typing import Any, List, Optional, Dict, Tuple
+from typing import Any, List, Optional, Dict
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +37,9 @@ class CacheIndex:
     """Manages the indexing of prompt cache blocks using Environment-aware keys."""
 
     def __init__(self):
-        self.lock = threading.Lock()
+        # NOTE: CacheIndex methods may call each other while holding the lock.
+        # Use a re-entrant lock to avoid self-deadlock (e.g., get_eviction_candidates -> get_vram_pages).
+        self.lock = threading.RLock()
         # Key: CacheKey -> Value: List[KVPage]
         self.key_to_pages: Dict[CacheKey, List[KVPage]] = {}
         # page_id -> KVPage (Flat access for global management)

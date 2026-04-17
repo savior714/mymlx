@@ -1,8 +1,6 @@
-import os
 import time
 import unittest
-from pathlib import Path
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 import mlx.core as mx
 from mlx_lm.models.cache import KVCache
 from mlx_server.cache_utils import (
@@ -10,7 +8,6 @@ from mlx_server.cache_utils import (
     MemoryPressureManager,
     PersistentCacheLayer,
     _tuples_to_kvcache,
-    CacheKey,
     KVPage
 )
 

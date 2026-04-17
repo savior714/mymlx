@@ -1,19 +1,40 @@
-"""Structured inference audit (JSONL + optional last-request snapshot)."""
+"""Structured inference audit (JSONL + optional last-request snapshot).
+
+All disk I/O is offloaded to a single background writer thread so that
+audit never blocks the inference hot-path.
+"""
 
 from __future__ import annotations
 
+import atexit
 import json
+import logging
+import queue
 import threading
 import uuid
 from argparse import Namespace
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, TypedDict
 
 from starlette.requests import Request
 
+
+class TokenUsage(TypedDict):
+    prompt_tokens: int
+    completion_tokens: int
+
+
+class TokenStats(TypedDict):
+    avg_prompt_tokens: float
+    avg_completion_tokens: float
+    total_requests: int
+    should_report: bool
+
 SCHEMA_V1 = "mlx_server.inference_audit.v1"
+
+logger = logging.getLogger(__name__)
 
 
 def resolve_request_id(request: Request) -> str:
@@ -73,10 +94,14 @@ def effective_inference_params(body: dict[str, Any], mlx_args: Namespace) -> dic
     top_p = body.get("top_p", mlx_args.top_p)
     top_k = body.get("top_k", mlx_args.top_k)
     min_p = body.get("min_p", mlx_args.min_p)
-    repetition_penalty = body.get("repetition_penalty", 0.0)
-    repetition_context_size = body.get("repetition_context_size", 20)
-    presence_penalty = body.get("presence_penalty", 0.0)
-    presence_context_size = body.get("presence_context_size", 20)
+    repetition_penalty = body.get("repetition_penalty", mlx_args.repetition_penalty)
+    repetition_context_size = body.get(
+        "repetition_context_size", mlx_args.repetition_context_size
+    )
+    presence_penalty = body.get("presence_penalty", mlx_args.presence_penalty)
+    presence_context_size = body.get(
+        "presence_context_size", mlx_args.presence_context_size
+    )
     frequency_penalty = body.get("frequency_penalty", 0.0)
     frequency_context_size = body.get("frequency_context_size", 20)
     seed = body.get("seed", None)
@@ -114,13 +139,122 @@ def server_runtime_snapshot(mlx_args: Namespace) -> dict[str, Any]:
     }
 
 
+_SENTINEL = object()
+
+
+class _AuditWriter:
+    """Single background thread that drains a queue of write tasks."""
+
+    def __init__(self) -> None:
+        self._q: queue.SimpleQueue[Any] = queue.SimpleQueue()
+        self._flush_event = threading.Event()
+        self._thread = threading.Thread(target=self._run, name="audit-writer", daemon=True)
+        self._thread.start()
+
+    def _run(self) -> None:
+        while True:
+            task = self._q.get()
+            if task is _SENTINEL:
+                self._flush_event.set()
+                break
+            if task is self._flush_event:
+                self._flush_event.set()
+                continue
+            try:
+                task()
+            except Exception:
+                logger.debug("Audit write error", exc_info=True)
+
+    def submit(self, fn: Any) -> None:
+        self._q.put(fn)
+
+    def flush(self, timeout: float = 5.0) -> None:
+        """Block until all previously submitted tasks have been processed."""
+        self._flush_event.clear()
+        self._q.put(self._flush_event)
+        self._flush_event.wait(timeout)
+
+    def shutdown(self) -> None:
+        self._q.put(_SENTINEL)
+        self._thread.join(timeout=3.0)
+
+
+_writer = _AuditWriter()
+atexit.register(_writer.shutdown)
+
+
+class TokenStatsTracker:
+    """Thread-safe tracker for cumulative token usage."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._total_requests = 0
+        self._total_prompt_tokens = 0
+        self._total_completion_tokens = 0
+
+    def update(self, prompt: int | None, completion: int | None) -> TokenStats:
+        with self._lock:
+            self._total_requests += 1
+            if prompt is not None:
+                self._total_prompt_tokens += prompt
+            if completion is not None:
+                self._total_completion_tokens += completion
+
+            avg_p = (
+                self._total_prompt_tokens / self._total_requests
+                if self._total_requests > 0
+                else 0.0
+            )
+            avg_c = (
+                self._total_completion_tokens / self._total_requests
+                if self._total_requests > 0
+                else 0.0
+            )
+
+            return {
+                "avg_prompt_tokens": round(avg_p, 2),
+                "avg_completion_tokens": round(avg_c, 2),
+                "total_requests": self._total_requests,
+            }
+
+    def get_stats(self) -> TokenStats:
+        with self._lock:
+            avg_p = (
+                self._total_prompt_tokens / self._total_requests
+                if self._total_requests > 0
+                else 0.0
+            )
+            avg_c = (
+                self._total_completion_tokens / self._total_requests
+                if self._total_requests > 0
+                else 0.0
+            )
+            return {
+                "avg_prompt_tokens": round(avg_p, 2),
+                "avg_completion_tokens": round(avg_c, 2),
+                "total_requests": self._total_requests,
+            }
+
+
+_stats_tracker = TokenStatsTracker()
+
+
+def get_global_token_stats() -> TokenStats:
+    """Return cumulative token usage averages."""
+    return _stats_tracker.get_stats()
+
+
 @dataclass
 class InferenceAuditTrail:
-    """Append JSONL and/or overwrite crash snapshot per request."""
+    """Append JSONL and/or overwrite crash snapshot per request.
+
+    All file I/O is submitted to a background writer thread so callers
+    never block on disk.
+    """
 
     audit_log_path: Path | None
     snapshot_path: Path | None
-    _lock: ClassVar[threading.Lock] = threading.Lock()
+    _dirs_ensured: ClassVar[set[Path]] = set()
 
     @property
     def enabled(self) -> bool:
@@ -133,6 +267,12 @@ class InferenceAuditTrail:
         log_path = Path(log_raw).expanduser() if log_raw else None
         snap_resolved = resolve_snapshot_path(log_raw, snap_raw)
         return cls(audit_log_path=log_path, snapshot_path=snap_resolved)
+
+    def _ensure_parent(self, p: Path) -> None:
+        parent = p.parent
+        if parent not in self._dirs_ensured:
+            parent.mkdir(parents=True, exist_ok=True)
+            self._dirs_ensured.add(parent)
 
     def write_snapshot(
         self,
@@ -159,11 +299,14 @@ class InferenceAuditTrail:
             "prompt_stats": prompt_stats,
             "server_runtime": server_runtime,
         }
-        text = json.dumps(payload, ensure_ascii=False, indent=2)
-        path_obj = self.snapshot_path
-        path_obj.parent.mkdir(parents=True, exist_ok=True)
-        with self._lock:
-            path_obj.write_text(text + "\n", encoding="utf-8")
+        text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        dest = self.snapshot_path
+        self._ensure_parent(dest)
+
+        def _write():
+            dest.write_text(text + "\n", encoding="utf-8")
+
+        _writer.submit(_write)
 
     def log_complete(
         self,
@@ -177,9 +320,19 @@ class InferenceAuditTrail:
         prompt_stats: dict[str, Any],
         server_runtime: dict[str, Any],
         priority: int | None,
-    ) -> None:
+        usage: TokenUsage | None = None,
+    ) -> TokenStats | None:
         if self.audit_log_path is None:
-            return
+            if usage:
+                return _stats_tracker.update(usage.get("prompt_tokens"), usage.get("completion_tokens"))
+            return None
+
+        avg_stats = (
+            _stats_tracker.update(usage.get("prompt_tokens"), usage.get("completion_tokens"))
+            if usage
+            else _stats_tracker.get_stats()
+        )
+
         record = {
             "schema": SCHEMA_V1,
             "event": "inference_complete",
@@ -191,12 +344,23 @@ class InferenceAuditTrail:
             "outcome": outcome,
             "effective": effective,
             "prompt_stats": prompt_stats,
+            "usage": usage,
+            "avg_usage": avg_stats,
             "server_runtime": server_runtime,
             "priority": priority,
         }
         line = json.dumps(record, ensure_ascii=False) + "\n"
         dest = self.audit_log_path
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        with self._lock:
+        self._ensure_parent(dest)
+
+        def _append():
             with dest.open("a", encoding="utf-8") as fh:
                 fh.write(line)
+
+        _writer.submit(_append)
+        return avg_stats
+
+    @staticmethod
+    def flush(timeout: float = 5.0) -> None:
+        """Wait for all pending audit writes to complete (for testing)."""
+        _writer.flush(timeout)

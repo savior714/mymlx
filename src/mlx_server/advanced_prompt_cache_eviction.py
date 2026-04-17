@@ -2,7 +2,6 @@
 
 import logging
 import time
-from typing import Any
 
 import mlx.core as mx
 
@@ -28,10 +27,11 @@ class AdvancedPromptCacheEvictionMixin:
     def _swap_sync(self, page: KVPage, kv_dict: dict):
         """sync 스왑 후 location을 DISK로 마킹. 실패 시 VRAM으로 롤백."""
         try:
-            self.persistent_layer._write_to_ssd(
-                self.persistent_layer.cache_dir / f"{page.page_id}.safetensors",
-                kv_dict
-            )
+            with self._metal_lock:
+                self.persistent_layer._write_to_ssd(
+                    self.persistent_layer.cache_dir / f"{page.page_id}.safetensors",
+                    kv_dict
+                )
             page.location = "DISK"
             page.kv_tensor = None
         except Exception as e:
@@ -137,20 +137,21 @@ class AdvancedPromptCacheEvictionMixin:
                     gpu_safe = self._inference_event.is_set() and not self._is_inference_active()
                     if gpu_safe and self._should_persist_to_ssd(page):
                         try:
-                            kv_dict = PersistentCacheLayer._serialize_kv_state(page.kv_tensor)
-                            if kv_dict:
-                                self.persistent_layer._write_to_ssd(
-                                    self.persistent_layer.cache_dir / f"{page.page_id}.safetensors",
-                                    kv_dict
-                                )
-                                page.location = "DISK"
-                                page.kv_tensor = None
-                                self._record_event("evicted_to_disk")
-                                logger.info(f"📦 CRITICAL Swap: {page.page_id[:8]} (P{page.priority}) -> SSD")
-                            else:
-                                page.location = "PURGED"
-                                page.kv_tensor = None
-                                self._record_event("purged_critical")
+                            with self._metal_lock:
+                                kv_dict = PersistentCacheLayer._serialize_kv_state(page.kv_tensor)
+                                if kv_dict:
+                                    self.persistent_layer._write_to_ssd(
+                                        self.persistent_layer.cache_dir / f"{page.page_id}.safetensors",
+                                        kv_dict
+                                    )
+                                    page.location = "DISK"
+                                    page.kv_tensor = None
+                                    self._record_event("evicted_to_disk")
+                                    logger.info(f"📦 CRITICAL Swap: {page.page_id[:8]} (P{page.priority}) -> SSD")
+                                else:
+                                    page.location = "PURGED"
+                                    page.kv_tensor = None
+                                    self._record_event("purged_critical")
                         except Exception as e:
                             page.location = "PURGED"
                             page.kv_tensor = None
@@ -169,7 +170,8 @@ class AdvancedPromptCacheEvictionMixin:
             )
 
         if state == "CRITICAL":
-            mx.clear_cache()
+            with self._metal_lock:
+                mx.clear_cache()
 
         self._cleanup_purged_metadata()
 

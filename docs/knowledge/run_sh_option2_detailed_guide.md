@@ -8,7 +8,9 @@
 
 ## §2. 범위 및 해석 기준
 
-이 문서는 `run.sh` 실행 후 메인 메뉴에서 **`2. Options`**를 선택했을 때 표시되는 **1~32번 항목 전체**를 설명한다.
+이 문서는 `run.sh` 실행 후 메인 메뉴에서 **`2. Options`**를 선택했을 때 표시되는 **공개(Public) 옵션(1~16)**만 설명한다.
+
+숨김/아카이브된 옵션(예: Temperature/Top-P/Top-K/Speculative/MCP/Tool Choice/Presence Penalty 등)은 기본 UI에서 노출하지 않는다.
 
 - 기준 버전: `run.sh`의 `menu_options()` 구현
 - 목적: "옵션의 기술적 의미", "값 조절 시 기대 변화", "권장 튜닝 순서"를 운영 관점에서 정리
@@ -30,7 +32,7 @@
 
 ---
 
-## §4. 옵션 상세(1~32)
+## §4. 공개 옵션 상세(1~16)
 
 ### 1) Host (`LISTEN_HOST`)
 - **기술 의미**: 서버 바인딩 주소(접근 범위/보안 경계 결정).
@@ -45,201 +47,108 @@
 - **성능 영향**: 실질 TPS 영향 없음.
 - **권장 범위**: 1024~65535, 흔한 값은 `8080`, `3000`, `18080`.
 
-### 3) Temperature (`USER_TEMP`)
-- **기술 의미**: 샘플링 무작위성(다양성) 강도.
-- **상향 효과**: 창의성/다양성 증가, 결과 변동성 증가.
-- **하향 효과**: 재현성/일관성 증가.
-- **권장 시작점**: 코드/정확성 작업 `0.0~0.3`, 일반 대화 `0.2~0.7`.
-
-### 4) Max Tokens (`USER_MAX`)
+### 3) Max Tokens (`USER_MAX`)
 - **기술 의미**: 요청 1회 생성 토큰 상한.
 - **상향 효과**: 장문 응답 완결성 증가.
 - **하향 효과**: 지연/OOM 리스크 완화.
-- **권장**: 기본은 보수적으로, 장문이 필요할 때만 단계적으로 증가.
+- **기본값(업스트림 mlx-lm)**: `512` (OpenAI 스타일 요청 필드 `max_tokens`의 기본값).
+- **핵심 제약**: \(prompt\_tokens + max\_tokens \le\) 모델 컨텍스트 길이.
+- **운영 원칙**: 잘라짐(`finish_reason=length`)이 보일 때만 단계적으로 증가.
 
-### 5) Top-P (`USER_TOP_P`)
-- **기술 의미**: 누클리어스 샘플링 컷오프.
-- **상향 효과**: 후보 폭 증가로 다양성 상승.
-- **하향 효과**: 보수적/안정적 출력.
-- **권장**: `0.8~1.0` 범위에서 `temperature`와 함께 조정.
-
-### 6) Top-K (`USER_TOP_K`)
-- **기술 의미**: 상위 K 후보만 샘플링.
-- **상향 효과**: 표현 다양성 증가 가능.
-- **하향 효과**: 패턴 안정화.
-- **권장**: `0`(비활성) 또는 `20~100` 실험.
-
-### 7) Adapter Path (`USER_ADAPTER`)
-- **기술 의미**: LoRA/Adapter 가중치 경로.
-- **설정 효과**: 특정 도메인 성능 향상 가능.
-- **주의**: 어댑터 품질/호환성에 따라 지연/품질이 달라질 수 있음.
-
-### 8) Log Level (`USER_LOG`)
-- **기술 의미**: 런타임 로그 상세도.
-- **상향(DEBUG) 효과**: 진단 정보 증가.
-- **하향(ERROR) 효과**: 로그 오버헤드 감소.
-- **권장**: 평시 `INFO`, 이슈 분석 시 `DEBUG`.
-
-### 9) Prompt Cache Size (`USER_PROMPT_CACHE_SIZE`)
+### 4) Prompt Cache Size (`USER_PROMPT_CACHE_SIZE`)
 - **기술 의미**: 캐시 엔트리 개수 상한.
 - **상향 효과**: 반복 요청 히트율 개선 가능.
 - **하향 효과**: 메타데이터 부담 감소.
 - **연계 옵션**: `15 Prompt Cache Bytes`와 함께 봐야 실제 메모리 사용이 맞춰짐.
+- **기본값(업스트림 mlx-lm)**: `10`.
 
-### 10) Decode Concurrency (`USER_DECODE_CONCURRENCY`)
+### 7) Decode Concurrency (`USER_DECODE_CONCURRENCY`)
 - **기술 의미**: 디코드(생성) 단계 병렬 처리 수.
 - **상향 효과**: 총 TPS 상승 가능성이 가장 큼.
 - **하향 효과**: 안정성 개선, OOM/abort 리스크 감소.
-- **운영 권장**: `1 -> 2 -> 4 -> 8` 식으로 단계 상승, 실패 시 한 단계 롤백.
+- **기본값(업스트림 mlx-lm)**: `32`.
+- **운영 팁**: 안정성 우선이면 낮게 시작해 단계적으로 상향하고, 문제 발생 시 즉시 롤백.
 
-### 11) Prompt Concurrency (`USER_PROMPT_CONCURRENCY`)
+### 8) Prompt Concurrency (`USER_PROMPT_CONCURRENCY`)
 - **기술 의미**: prefill(입력 인코딩) 병렬 처리 수.
 - **상향 효과**: 긴 입력 다건 처리량 개선.
 - **하향 효과**: 피크 메모리 압력 완화.
-- **권장**: 긴 컨텍스트가 많을 때 `2~4`부터 점검.
+- **기본값(업스트림 mlx-lm)**: `8`.
+- **운영 팁**: TTFT 급증/메모리 압박이 있으면 먼저 하향.
 
-### 12) Prefill Step Size (`USER_PREFILL_STEP_SIZE`)
+### 9) Prefill Step Size (`USER_PREFILL_STEP_SIZE`)
 - **기술 의미**: prefill 청크 크기.
 - **상향 효과**: 처리 효율 향상 가능, 대신 피크 메모리 증가 가능.
 - **하향 효과**: 메모리 피크 완화, 오버헤드 증가 가능.
-- **권장**: 기본 `2048`에서 `1024/4096` 비교 실험.
+- **기본값(업스트림 mlx-lm)**: `2048`.
+- **운영 팁**: 장문·동시성이 높을수록 보수적으로(상향은 피크 메모리와 트레이드오프).
 
-### 13) Metal Memory Limit (`USER_METAL_MEMORY_LIMIT`)
+### 10) Metal Memory Limit (`USER_METAL_MEMORY_LIMIT`)
 - **기술 의미**: MLX Wired 메모리 상한.
 - **상향 효과**: 대형 모델/긴 컨텍스트 여유 증가.
 - **하향 효과**: OS/다른 앱 여유 확보.
 - **입력 형식**: `96GB`, `512MB`처럼 단위 필수.
+- **주의**: 이 값은 `mlx-server` 운영 옵션이며, 업스트림 `mlx-lm`의 공개 문서에 범위가 고정되어 있지 않다.
 
-### 14) Metal Cache Limit (`USER_METAL_CACHE_LIMIT`)
+### 11) Metal Cache Limit (`USER_METAL_CACHE_LIMIT`)
 - **기술 의미**: Metal 임시 캐시 상한.
 - **상향 효과**: 재할당 감소로 속도 안정 가능.
 - **하향 효과**: 메모리 회수 빨라져 OOM 완화.
-- **권장**: `4GB -> 6GB -> 8GB` 식 단계 조정.
+- **운영 팁**: 크래시/메모리 압박이 있으면 하향, 지연 변동이 크면 상향을 검토.
 
-### 15) Prompt Cache Bytes (`USER_PROMPT_CACHE_BYTES`)
+### 5) Prompt Cache Bytes (`USER_PROMPT_CACHE_BYTES`)
 - **기술 의미**: KV/Prompt 캐시 총 바이트 상한.
 - **상향 효과**: 캐시 히트율/반복 응답 속도 개선 가능.
 - **하향 효과**: 피크 메모리 급증 방지.
 - **운영 팁**: 모델 크기와 동시성에 맞춰 `12GB~24GB`에서 시작.
 
-### 16) Advanced Cache (`USER_ADVANCED_CACHE`)
-- **기술 의미**: 고급 캐시 엔진 ON/OFF 토글.
-- **ON 효과**: 반복/유사 요청에서 재사용 효율 개선 가능.
-- **OFF 효과**: 동작 단순화, 디버깅/재현성에 유리할 수 있음.
-- **권장**: 반복 프롬프트 워크로드면 ON, 문제 추적 시 OFF 비교.
-
-### 17) Paged Cache Size (`USER_PAGE_SIZE`)
+### 6) Paged Cache Size (`USER_PAGE_SIZE`)
 - **기술 의미**: 캐시 페이지 단위(토큰).
 - **작게 설정 효과**: 재사용 정밀도 증가.
 - **크게 설정 효과**: 관리 오버헤드 감소.
 - **권장**: 기본 `128`, 유사 요청이 매우 많으면 `256` 테스트.
 
-### 18) KV Cache Bits (`USER_KV_BITS`)
+### 12) KV Cache Bits (`USER_KV_BITS`)
 - **기술 의미**: KV 캐시 양자화 비트폭(4/8/Off).
 - **4bit 효과**: 메모리 절감 최대, 품질 저하 가능성 있음.
 - **8bit 효과**: 절감과 품질의 균형.
 - **Off 효과**: 품질 우선, 메모리 부담 큼.
-- **권장**: 메모리 압력/중단 이슈가 있으면 8bit부터 적용, 필요 시 4bit.
+- **권장**: 운영 기본은 `8bit`, 메모리 압력/중단 이슈가 있으면 `8bit`부터 적용 후 필요 시 `4bit`.
 
-### 19) KV Group Size (`USER_KV_GROUP_SIZE`)
+### 13) KV Group Size (`USER_KV_GROUP_SIZE`)
 - **기술 의미**: KV 양자화 그룹 크기.
 - **작게 설정 효과**: 품질/정밀도 유리.
 - **크게 설정 효과**: 압축 효율 유리.
 - **권장**: `kv-bits=8` 기준 `32`와 `64` 비교.
 
-### 20) Cache Grace Secs (`USER_CACHE_GRACE_SECONDS`)
+### 14) Cache Grace Secs (`USER_CACHE_GRACE_SECONDS`)
 - **기술 의미**: cold 블록 최소 보존 시간(초).
 - **상향 효과**: 재사용 기회 증가.
 - **하향 효과**: 빠른 회수로 메모리 압박 완화.
-- **권장 시작점**: `10~30`초.
+- **입력 허용 범위(run.sh 검증)**: `0~600`.
 
-### 21) Prompt Normalize (`USER_PROMPT_NORMALIZATION`)
-- **기술 의미**: 입력 공백/개행 정규화 토글.
-- **ON 효과**: 캐시 키 일관성 증가, 히트율 개선 가능.
-- **OFF 효과**: 원문 형태 보존.
-- **권장**: 캐시 히트율 개선 목적이면 ON 실험.
-
-### 22) Cache Observability (`USER_CACHE_OBSERVABILITY`)
-- **기술 의미**: 캐시 진단 로그 토글.
-- **ON 효과**: 병목/축출 원인 분석에 유리.
-- **OFF 효과**: 로그 오버헤드 최소화.
-- **권장**: 튜닝/장애 분석 시 ON, 순수 성능 운영 시 OFF.
-
-### 23) Cache Headroom (`USER_CACHE_HEADROOM_RATIO`)
+### 15) Cache Headroom (`USER_CACHE_HEADROOM_RATIO`)
 - **기술 의미**: 메모리 압박 상황에서 목표 여유 비율.
 - **낮게 설정 효과**: 안정성 상승, 캐시 보존량 감소.
 - **높게 설정 효과**: 캐시 보존량 증가 가능, 압박 리스크 증가.
-- **권장 범위**: `0.70 ~ 0.90`.
+- **입력 허용 범위(run.sh 검증)**: `0.50 ~ 0.95`.
 
-### 24) Light Benchmark (Run)
+---
+
+## §8. 근거 링크(업스트림)
+
+- `mlx-lm` HTTP server request fields / `max_tokens` 기본값: `https://raw.githubusercontent.com/ml-explore/mlx-lm/main/mlx_lm/SERVER.md`
+- `mlx-lm` server CLI 기본값(`--max-tokens`, `--decode-concurrency`, `--prompt-concurrency`, `--prefill-step-size`, `--prompt-cache-size`): `https://raw.githubusercontent.com/ml-explore/mlx-lm/564281f7/mlx_lm/server.py`
+
+### 16) Light Benchmark (Run)
 - **기술 의미**: 1회 요청 실측 후 50K 토큰 시간을 환산.
 - **출력 지표**: E2E TPS, 50K 예상 소요 시간.
 - **용도**: 빠른 기준선 확인.
 
-### 25) Stream TPS Compare (Run)
-- **기술 의미**: `stream=true`로 Decode TPS와 E2E TPS 분리 측정.
-- **출력 지표**: prefill, decode_tps, e2e_tps, 50K 환산.
-- **용도**: "첫 토큰 지연 vs 생성 구간 속도" 분리 분석.
+## §5. 숨김/아카이브 옵션
 
-### 26) 5x Summary Bench (Run)
-- **기술 의미**: 24 또는 25 시나리오를 5회 반복해 min/avg/max 통계 제공.
-- **용도**: 단일 측정 편차를 줄인 운영값 결정.
-
-### 27) Speculative Decoding (`USER_SPECULATIVE_DECODING`)
-- **기술 의미**: 추측 디코딩(Speculative Decoding) 사용 여부 토글.
-- **ON 효과**: Draft(소형) 모델이 토큰 후보를 빠르게 생성하고 Target(대형) 모델이 한 번의 forward pass로 검증/수정. 코딩, 보일러플레이트 등 예측 가능한 패턴에서 생성 속도 크게 향상 가능.
-- **OFF 효과**: 표준 디코딩 사용. Continuous batching(동시 요청 배칭) 가능.
-- **주의**: ON 시 `is_batchable = False`가 설정되어 **continuous batching이 자동 비활성화**된다. 동시 다수 요청 환경에서는 처리량이 오히려 저하될 수 있다.
-- **연계 옵션**: 반드시 `28 Draft Model Path`를 함께 설정해야 동작. `29 Num Draft Tokens`로 후보 수 조절.
-
-### 28) Draft Model Path (`USER_DRAFT_MODEL`)
-- **기술 의미**: Speculative Decoding에 사용할 소형 Draft 모델 경로.
-- **입력 형식**: 로컬 절대 경로(예: `~/Desktop/models/Qwen3-1.7B-4bit`) 또는 HF Repo ID.
-- **호환성 조건**: Target 모델과 **동일한 `vocab_size`를 가진 토크나이저**를 공유해야 함. 불일치 시 생성 품질 심각히 저하.
-- **권장 크기**: Target 크기의 1/10~1/30. 예: 30B Target → 1~3B Draft(4-bit 기준 ~0.5~2GB 추가 메모리).
-- **성능 영향**: Draft 모델이 너무 크면 forward pass 비용이 높아져 이점이 감소.
-
-### 29) Num Draft Tokens (`USER_NUM_DRAFT_TOKENS`)
-- **기술 의미**: Draft 모델이 한 스텝에서 생성할 후보 토큰 수.
-- **상향(16~20) 효과**: 코딩/보일러플레이트 등 예측 가능한 패턴에서 수락률이 높아 속도 이점 극대화.
-- **하향(3~5) 효과**: 짧은 응답, 비정형 추론, 큰 Draft 모델(>7B)에서 overhead 감소.
-- **기본값**: `3`.
-- **권장 범위**: 코딩 `16~20`, 복잡 추론 `8~12`, 짧은 응답/큰 Draft `3~5`.
-
-### 30) Chat Template Args (`USER_CHAT_TEMPLATE_ARGS`)
-- **기술 의미**: 토크나이저의 `apply_chat_template`에 전달할 JSON 인자.
-- **대표 설정**: `{"enable_thinking":true}` → 모델의 reasoning/thinking 모드 활성화(Qwen3 등 지원 모델).
-- **`enable_thinking: false`**: thinking 비활성화하여 빠르고 간결한 응답.
-- **빈 값(`{}`)**: 모델 기본 템플릿 동작 유지.
-- **성능 영향**: thinking 모드 ON 시 출력 토큰 수 증가(내부 추론 토큰 포함)로 총 지연 증가 가능. 품질은 향상될 수 있음.
-- **입력 형식**: 유효한 JSON 문자열 필수. 잘못된 형식 입력 시 거부.
-
-### 31) Tool Choice Default (`USER_TOOL_CHOICE_DEFAULT`)
-- **기술 의미**: 클라이언트가 `tool_choice`를 지정하지 않았을 때 프록시 레이어에서 주입하는 기본값.
-- **`auto`(기본)**: 모델이 tool 호출 여부를 자율 판단. OpenAI API 기본 동작과 동일.
-- **`none`**: tool 호출을 하지 않고 텍스트만 생성. tools 배열이 있어도 무시.
-- **`required`**: 반드시 하나 이상의 tool을 호출. 에이전트 워크플로우에서 tool 호출을 강제할 때 사용.
-- **적용 조건**: 요청 바디에 `tools` 배열이 존재하고 `tool_choice`가 없을 때만 주입. `tools`가 없는 일반 채팅 요청에는 영향 없음.
-- **프록시 동작**: `request_transformer.py`에서 chat completion 요청을 변환할 때 `data["tool_choice"]`를 설정.
-- **CLI 플래그**: `--tool-choice-default auto|none|required`
-- **환경 변수**: `MLX_SERVER_TOOL_CHOICE_DEFAULT`
-
-### 32) MCP Config Path (`USER_MCP_CONFIG_PATH`)
-- **기술 의미**: MCP(Model Context Protocol) 설정 JSON 파일 경로. 서버가 이 파일을 `GET /v1/mlx/mcp-config` 엔드포인트로 노출하여 클라이언트 측 tool 통합을 지원.
-- **설정 시 효과**: 클라이언트(Cursor, Continue, 커스텀 에이전트 등)가 해당 엔드포인트를 조회하여 MCP 서버 목록/도구 정보를 자동으로 가져갈 수 있음.
-- **미설정 시**: 엔드포인트가 `configured: false`를 반환.
-- **입력 형식**: 파일 경로 (예: `~/.mcp.json`, `~/projects/my-agent/.mcp.json`). `~`는 자동 확장.
-- **유효성 검증**: 파일 존재 여부를 TUI에서 경고(존재하지 않아도 설정 가능). API 호출 시 JSON 파싱 실패는 422 응답.
-- **CLI 플래그**: `--mcp-config-path PATH`
-- **환경 변수**: `MLX_SERVER_MCP_CONFIG_PATH`
-- **API 응답 예시**:
-  ```json
-  {
-    "configured": true,
-    "path": "/Users/user/.mcp.json",
-    "config": { "mcpServers": { ... } }
-  }
-  ```
+- 이 문서 범위 밖의 옵션들은 기본 TUI에서 “비공개”로 숨긴다.
+- 필요 시 코드 수준에서만 재노출하거나 별도 아카이브 문서로 관리한다.
 
 ---
 
@@ -270,7 +179,9 @@
 ### 시나리오 D: 응답 품질 저하가 체감됨
 1. `18 KV Cache Bits`를 8bit 또는 Off로 상향
 2. `19 KV Group Size`를 더 작게
-3. 샘플링(`3/5/6`)을 보수적으로 재설정
+3. 샘플링(`3/5/6/33`)을 보수적으로 재설정
+4. 반복 루프가 보이면 `34 Repetition Penalty`를 1.1부터 적용
+5. 같은 단어/토픽만 반복되면 `35 Presence Penalty`를 0.3부터 적용
 
 ---
 
@@ -383,6 +294,9 @@ Q4 대형 모델 운영에서 시작점 권장:
 - `3 Temperature`: `0.2`
 - `5 Top-P`: `0.9~0.95`
 - `6 Top-K`: `40` (또는 `0`으로 비활성)
+- `33 Min-P`: `0.05` (Top-P 보완 노이즈 필터)
+- `34 Repetition Penalty`: `0.0`(비활성) 또는 장문 루프 시 `1.1`
+- `35 Presence Penalty`: `0.0`(비활성) 또는 다양성 확보 시 `0.3~0.6`
 - `4 Max Tokens`: `512` (긴 출력 필요 시 점진 상향)
 
 ### 7.7 벤치 기반 적용 절차(권장)

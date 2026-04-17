@@ -44,11 +44,23 @@
 | `outcome` | `success` \| `upstream_error` \| `transport_error` \| `stream_interrupted` |
 | `effective` | `mlx_lm.server`와 동일 규칙으로 병합한 요청 파라미터(샘플링·길이 등) |
 | `prompt_stats` | `message_count`·`prompt_chars` 등(텍스트 길이 합, 내용 비저장) |
-| `server_runtime` | 서버 프로세스의 MLX CLI 기본(동시성·KV 등) 일부 |
+| `usage` | `prompt_tokens`, `completion_tokens` (실제 토큰 수, 추출 성공 시) |
+| `avg_usage` | `avg_prompt_tokens`, `avg_completion_tokens` (현재까지의 누적 평균) |
+
+## 토큰 통계 (Token Usage Statistics)
+
+서버는 각 요청이 완료될 때마다 실제 사용된 토큰 수를 추적하고 누적 평균을 계산한다.
+
+1. **추출**: `usage` 데이터는 업스트림 응답(JSON 또는 SSE stream)에서 추출한다.
+2. **누적**: 서버 가동 이후의 총 요청 수와 총 토큰 합계를 메모리에서 관리한다. (서버 재시작 시 초기화)
+3. **노출**: 
+   - 감사 로그(`audit_log_path`)의 각 레코드에 `usage` 및 `avg_usage` 필드를 포함한다.
+   - 메트릭 로그(`mlx_server.metrics`) 출력 시 현재 누적 평균을 함께 표시한다.
 
 ## 개인정보·보안
 
 - **프롬프트·완성 텍스트는 기록하지 않는다.**
+- **토큰 수와 통계 정보만 기록하여 추론 패턴 분석에 활용한다.**
 - 필요 시 운영 정책에 따라 로그 파일 접근 권한을 제한한다.
 
 ## 수용 기준 (AC)
@@ -56,3 +68,5 @@
 - 감사 비활성화 시 동작·성능에 실질적 부담이 없다.
 - JSONL는 파서 친화적으로 **한 줄 한 이벤트**이다.
 - `effective` 병합 규칙은 `mlx_lm.server`의 요청 파싱과 일치한다.
+- **모든 추론 요청(Chat/Normal)에 대해 누적 평균 토큰값이 올바르게 계산된다.**
+- **토큰 추출 실패 시 해당 요청은 통계 합산에서 제외되거나 안전하게 처리된다.**

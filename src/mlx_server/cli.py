@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import sys
 from pathlib import Path
 
 import uvicorn
@@ -78,6 +77,12 @@ def main() -> None:
         level=getattr(logging, mlx_ns.log_level.upper(), logging.INFO),
         format="%(asctime)s - %(levelname)s - %(message)s",
     )
+    # Suppress verbose token-by-token debug noise from upstream mlx_lm.server.
+    # Keep at least INFO even when global log level is DEBUG.
+    logging.getLogger("mlx_lm.server").setLevel(logging.INFO)
+    # Reduce transport-level debug spam from HTTP client internals.
+    logging.getLogger("httpx").setLevel(logging.INFO)
+    logging.getLogger("httpcore").setLevel(logging.INFO)
 
     backend = start_backend(mlx_ns)
     app = build_app(backend)

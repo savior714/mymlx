@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from typing import Any
@@ -16,11 +15,30 @@ class MlxRequestTransformer:
     """Handles mutation and normalization of OpenAI-style requests for MLX."""
 
     @staticmethod
+    def ensure_chat_messages(data: dict) -> bool:
+        """Ensure chat/completions payload uses OpenAI-style `messages`."""
+        messages = data.get("messages")
+        if isinstance(messages, list):
+            return False
+
+        prompt = data.get("prompt")
+        if not isinstance(prompt, str):
+            return False
+
+        data["messages"] = [{"role": "user", "content": prompt}]
+        data.pop("prompt", None)
+        return True
+
+    @staticmethod
     def normalize_chat_messages(data: dict) -> int:
-        """Make chat `messages` compatible with `mlx_lm.server.process_message_content`."""
+        """Make chat `messages` compatible with `mlx_lm.server.process_message_content`.
+
+        Returns the number of messages whose content was converted (list -> string).
+        """
         messages = data.get("messages")
         if not isinstance(messages, list):
             return 0
+        converted = 0
         total_dropped = 0
         for msg in messages:
             if not isinstance(msg, dict):
@@ -35,16 +53,16 @@ class MlxRequestTransformer:
                     text_parts.append(str(fragment.get("text", "")))
                 else:
                     dropped_here += 1
-            if dropped_here:
-                total_dropped += dropped_here
+            total_dropped += dropped_here
             msg["content"] = "".join(text_parts)
+            converted += 1
         
         if total_dropped:
             logger.warning(
                 "Stripped %d non-text message content part(s) for MLX (text-only upstream)",
                 total_dropped,
             )
-        return total_dropped
+        return converted
 
     @staticmethod
     def normalize_prompt_payload(data: dict) -> tuple[int, int]:
@@ -103,8 +121,10 @@ class MlxRequestTransformer:
 
         # 2. Chat Normalization
         if path in ("/v1/chat/completions", "/chat/completions"):
-            MlxRequestTransformer.normalize_chat_messages(data)
-            mutated = True
+            if MlxRequestTransformer.ensure_chat_messages(data):
+                mutated = True
+            if MlxRequestTransformer.normalize_chat_messages(data):
+                mutated = True
 
         # 3. Tool Choice Default
         if path in ("/v1/chat/completions", "/chat/completions"):

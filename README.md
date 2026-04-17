@@ -67,10 +67,10 @@ uv run mlx-server serve --help
 uv run pytest
 ```
 
-통합 검증(에이전트 보고용 `verify-last-result.json` 생성):
+통합 검증(ruff → ty → pytest, 에이전트 보고용 `verify-last-result.json` 생성):
 
 ```bash
 ./verify.sh
 ```
 
-추가 인자는 `pytest`에 그대로 전달됩니다(예: `./verify.sh -k smoke`).
+`pytest`에만 추가 인자가 전달됩니다(예: `./verify.sh -k smoke`). 앞 단계(ruff/ty)가 실패하면 pytest는 실행되지 않습니다.

@@ -86,6 +86,30 @@ def add_mlx_server_arguments(parser: argparse.ArgumentParser) -> None:
         help="Default min-p sampling (default: 0.0, disables min-p)",
     )
     parser.add_argument(
+        "--repetition-penalty",
+        type=float,
+        default=0.0,
+        help="Default repetition penalty (default: 0.0, disables penalty)",
+    )
+    parser.add_argument(
+        "--repetition-context-size",
+        type=int,
+        default=20,
+        help="Token window for repetition penalty (default: 20)",
+    )
+    parser.add_argument(
+        "--presence-penalty",
+        type=float,
+        default=0.0,
+        help="Default presence penalty (default: 0.0, disables penalty)",
+    )
+    parser.add_argument(
+        "--presence-context-size",
+        type=int,
+        default=20,
+        help="Token window for presence penalty (default: 20)",
+    )
+    parser.add_argument(
         "--max-tokens",
         type=int,
         default=512,

@@ -24,6 +24,9 @@ USER_TEMP=""
 USER_MAX=""
 USER_TOP_P=""
 USER_TOP_K=""
+USER_MIN_P=""
+USER_REPETITION_PENALTY=""
+USER_PRESENCE_PENALTY=""
 USER_ADAPTER=""
 USER_LOG="INFO"
 USER_PROMPT_CACHE_SIZE=""
@@ -33,8 +36,8 @@ USER_PREFILL_STEP_SIZE=""
 USER_METAL_MEMORY_LIMIT=""
 USER_METAL_CACHE_LIMIT=""
 USER_PROMPT_CACHE_BYTES=""
-USER_ADVANCED_CACHE="true"
-USER_PAGE_SIZE="128"
+USER_ADVANCED_CACHE="false"
+USER_PAGE_SIZE=""
 USER_KV_BITS=""
 USER_KV_GROUP_SIZE=""
 USER_CACHE_GRACE_SECONDS=""
@@ -54,7 +57,7 @@ is_int() {
 }
 
 is_number() {
-    [[ "${1:-}" =~ ^[0-9]+([.][0-9]+)?$ ]]
+    [[ "${1:-}" =~ ^-?[0-9]+([.][0-9]+)?$ ]]
 }
 
 is_size_with_unit() {
@@ -128,6 +131,8 @@ run_light_benchmark_50k() {
     local top_p="${USER_TOP_P:-1.0}"
     local top_k="${USER_TOP_K:-0}"
     local max_tokens="${USER_MAX:-160}"
+    local min_p="${USER_MIN_P:-0}"
+    local rep_penalty="${USER_REPETITION_PENALTY:-0}"
 
     if ! curl -sS -m 2 "${endpoint}/v1/models" >/dev/null; then
         echo "❌ 서버에 연결할 수 없습니다: ${endpoint}"
@@ -136,7 +141,7 @@ run_light_benchmark_50k() {
         return
     fi
 
-    UV_NO_SYNC=1 uv run python - "$endpoint" "$temp" "$top_p" "$top_k" "$max_tokens" <<'PY'
+    UV_NO_SYNC=1 uv run python - "$endpoint" "$temp" "$top_p" "$top_k" "$max_tokens" "$min_p" "$rep_penalty" <<'PY'
 import json
 import sys
 import time
@@ -147,6 +152,8 @@ temp = float(sys.argv[2])
 top_p = float(sys.argv[3])
 top_k = int(sys.argv[4])
 max_tokens = int(sys.argv[5])
+min_p = float(sys.argv[6])
+rep_penalty = float(sys.argv[7])
 
 target_tokens = 50000
 
@@ -178,6 +185,8 @@ with httpx.Client(timeout=300.0) as client:
         "top_p": top_p,
         "top_k": top_k,
         "max_tokens": max_tokens,
+        "min_p": min_p,
+        "repetition_penalty": rep_penalty,
         "stream": False,
     }
 
@@ -227,6 +236,8 @@ run_stream_decode_benchmark_50k() {
     local top_p="${USER_TOP_P:-1.0}"
     local top_k="${USER_TOP_K:-0}"
     local max_tokens="${USER_MAX:-160}"
+    local min_p="${USER_MIN_P:-0}"
+    local rep_penalty="${USER_REPETITION_PENALTY:-0}"
 
     if ! curl -sS -m 2 "${endpoint}/v1/models" >/dev/null; then
         echo "❌ 서버에 연결할 수 없습니다: ${endpoint}"
@@ -235,7 +246,7 @@ run_stream_decode_benchmark_50k() {
         return
     fi
 
-    UV_NO_SYNC=1 uv run python - "$endpoint" "$temp" "$top_p" "$top_k" "$max_tokens" <<'PY'
+    UV_NO_SYNC=1 uv run python - "$endpoint" "$temp" "$top_p" "$top_k" "$max_tokens" "$min_p" "$rep_penalty" <<'PY'
 import json
 import sys
 import time
@@ -246,6 +257,8 @@ temp = float(sys.argv[2])
 top_p = float(sys.argv[3])
 top_k = int(sys.argv[4])
 max_tokens = int(sys.argv[5])
+min_p = float(sys.argv[6])
+rep_penalty = float(sys.argv[7])
 target_tokens = 50000
 
 with httpx.Client(timeout=300.0) as client:
@@ -275,6 +288,8 @@ with httpx.Client(timeout=300.0) as client:
         "top_p": top_p,
         "top_k": top_k,
         "max_tokens": max_tokens,
+        "min_p": min_p,
+        "repetition_penalty": rep_penalty,
         "stream": True,
     }
 
@@ -354,6 +369,8 @@ run_repeat_benchmark_5x() {
     local top_p="${USER_TOP_P:-1.0}"
     local top_k="${USER_TOP_K:-0}"
     local max_tokens="${USER_MAX:-160}"
+    local min_p="${USER_MIN_P:-0}"
+    local rep_penalty="${USER_REPETITION_PENALTY:-0}"
 
     if ! curl -sS -m 2 "${endpoint}/v1/models" >/dev/null; then
         echo "❌ 서버에 연결할 수 없습니다: ${endpoint}"
@@ -362,7 +379,7 @@ run_repeat_benchmark_5x() {
         return
     fi
 
-    UV_NO_SYNC=1 uv run python - "$endpoint" "$temp" "$top_p" "$top_k" "$max_tokens" "$bench_type" <<'PY'
+    UV_NO_SYNC=1 uv run python - "$endpoint" "$temp" "$top_p" "$top_k" "$max_tokens" "$bench_type" "$min_p" "$rep_penalty" <<'PY'
 import json
 import sys
 import time
@@ -374,6 +391,8 @@ top_p = float(sys.argv[3])
 top_k = int(sys.argv[4])
 max_tokens = int(sys.argv[5])
 bench_type = sys.argv[6]  # 1=light(e2e), 2=stream(decode+e2e)
+min_p = float(sys.argv[7])
+rep_penalty = float(sys.argv[8])
 runs = 5
 
 def summary(values):
@@ -412,6 +431,8 @@ with httpx.Client(timeout=300.0) as client:
                 "top_p": top_p,
                 "top_k": top_k,
                 "max_tokens": max_tokens,
+                "min_p": min_p,
+                "repetition_penalty": rep_penalty,
                 "stream": False,
             }
             t0 = time.perf_counter()
@@ -436,6 +457,8 @@ with httpx.Client(timeout=300.0) as client:
                 "top_p": top_p,
                 "top_k": top_k,
                 "max_tokens": max_tokens,
+                "min_p": min_p,
+                "repetition_penalty": rep_penalty,
                 "stream": True,
             }
             t0 = time.perf_counter()
@@ -521,6 +544,9 @@ save_config() {
         echo "USER_MAX=\"$USER_MAX\""
         echo "USER_TOP_P=\"$USER_TOP_P\""
         echo "USER_TOP_K=\"$USER_TOP_K\""
+        echo "USER_MIN_P=\"$USER_MIN_P\""
+        echo "USER_REPETITION_PENALTY=\"$USER_REPETITION_PENALTY\""
+        echo "USER_PRESENCE_PENALTY=\"$USER_PRESENCE_PENALTY\""
         echo "USER_ADAPTER=\"$USER_ADAPTER\""
         echo "USER_LOG=\"$USER_LOG\""
         echo "USER_PROMPT_CACHE_SIZE=\"$USER_PROMPT_CACHE_SIZE\""
@@ -626,6 +652,9 @@ start_server() {
     [[ -n "$USER_MAX" ]] && ARGS+=(--max-tokens "$USER_MAX")
     [[ -n "$USER_TOP_P" ]] && ARGS+=(--top-p "$USER_TOP_P")
     [[ -n "$USER_TOP_K" ]] && ARGS+=(--top-k "$USER_TOP_K")
+    [[ -n "$USER_MIN_P" ]] && ARGS+=(--min-p "$USER_MIN_P")
+    [[ -n "$USER_REPETITION_PENALTY" ]] && ARGS+=(--repetition-penalty "$USER_REPETITION_PENALTY")
+    [[ -n "$USER_PRESENCE_PENALTY" ]] && ARGS+=(--presence-penalty "$USER_PRESENCE_PENALTY")
     [[ -n "$USER_ADAPTER" ]] && ARGS+=(--adapter-path "$USER_ADAPTER")
     [[ -n "$USER_LOG" ]] && ARGS+=(--log-level "$USER_LOG")
     [[ -n "$USER_PROMPT_CACHE_SIZE" ]] && ARGS+=(--prompt-cache-size "$USER_PROMPT_CACHE_SIZE")
@@ -713,17 +742,16 @@ start_server() {
         echo "========================================"
         echo "서버 실행 중 오류가 발생했습니다. (Code: $exit_code)"
         if [[ $exit_code -eq 139 ]]; then
-            echo "⚠ SIGSEGV (Signal 11) — Metal GPU 메모리 부족으로 프로세스가 강제 종료되었습니다."
-            echo "  → KV 캐시 양자화(--kv-bits 4/8) 또는 Metal Memory Limit 조정을 권장합니다."
+            echo "⚠ SIGSEGV (Signal 11) — Metal GPU 메모리 부족 또는 접근 오류로 강제 종료되었습니다."
+            echo "  → [해결책] Advanced Cache 활성화 및 --kv-bits 4/8 설정을 권장합니다."
         elif [[ $exit_code -eq 137 ]]; then
-            echo "⚠ SIGKILL (Signal 9) — 시스템 메모리 압력(Jetsam)으로 프로세스가 종료되었습니다."
+            echo "⚠ SIGKILL (Signal 9) — OS 메모리 압력으로 인해 프로세스가 종료되었습니다."
+            echo "  → [해결책] --metal-memory-limit을 기기 RAM의 70% 수준으로 낮추고, 다른 앱을 종료하세요."
         elif [[ $exit_code -eq 134 ]]; then
-            echo "⚠ SIGABRT (Signal 6) — 내부 assertion 실패."
-            if [[ $safe_retry_applied -eq 1 ]]; then
-                echo "  → 안전 모드 재시도에서도 실패했습니다."
-            else
-                echo "  → decode/prompt concurrency를 1로 낮추고 --no-advanced-cache를 권장합니다."
-            fi
+            echo "⚠ SIGABRT (Signal 6) — 내부 Assertion 실패 (동시성 충돌 가능성)."
+            echo "  → [해결책] --decode-concurrency를 1~2 수준으로 낮추어 테스트하세요."
+        elif [[ $exit_code -eq 143 || $exit_code -eq 15 ]]; then
+            echo "ℹ SIGTERM 감지: 프로세스가 외부 또는 사용자로부터 종료되었습니다."
         fi
         echo "========================================"
         sleep 3
@@ -736,48 +764,29 @@ start_server() {
 menu_options() {
     while true; do
         show_header
-        echo "Current Settings & Explanations"
-        echo "Guide: 값 상향/하향 시 TPS(토큰/초), 지연, 메모리, 품질 간 트레이드오프를 함께 확인하세요."
+        echo "Options (Public)"
+        echo "Guide: 사용자에게 노출하는 옵션만 표시합니다. (기타 옵션은 숨김/아카이브)"
         echo "----------------------------------------------------------------------"
-        printf " %2d. Host:               %-15s (바인딩 주소: 보안/접근 범위 제어 | TPS 직접 영향은 거의 없음)\n" 1 "$LISTEN_HOST"
-        printf " %2d. Port:               %-15s (수신 포트: 충돌 회피/동시 운영 | TPS 직접 영향은 거의 없음)\n" 2 "$LISTEN_PORT"
-        printf " %2d. Temperature:        %-15s (샘플링 다양성: ↑창의성·변동성 / ↓재현성 | 토큰 품질 체감 영향)\n" 3 "${USER_TEMP:-Default}"
-        printf " %2d. Max Tokens:         %-15s (출력 상한: ↑장문·총지연↑ / ↓짧은응답·총지연↓ | 요청당 생성 토큰량 결정)\n" 4 "${USER_MAX:-Default}"
-        printf " %2d. Top-P:              %-15s (누클리어스 범위: ↑다양성 / ↓보수성 | 디코드 안정성·일관성 영향)\n" 5 "${USER_TOP_P:-Default}"
-        printf " %2d. Top-K:              %-15s (후보 제한: ↑다양성 / ↓안정성 | 생성 패턴·노이즈 제어)\n" 6 "${USER_TOP_K:-Default}"
-        printf " %2d. Adapter Path:       %-15s (LoRA 적용: 품질/도메인 성능 변화 | TPS는 모델·어댑터 구조에 따라 변동)\n" 7 "${USER_ADAPTER:-None}"
-        printf " %2d. Log Level:          %-15s (로그 상세도: DEBUG↑진단·오버헤드↑ / ERROR↑가벼움)\n" 8 "$USER_LOG"
-        printf " %2d. Prompt Cache Size:  %-15s (캐시 엔트리 수: ↑히트율·재사용 / ↓메타 메모리·관리비용)\n" 9 "${USER_PROMPT_CACHE_SIZE:-Default}"
-        printf " %2d. Decode Concurrency: %-15s (생성 병렬도: ↑총TPS / ↑OOM·개별지연 가능 | 토큰처리량 핵심)\n" 10 "${USER_DECODE_CONCURRENCY:-Default}"
-        printf " %2d. Prompt Concurrency: %-15s (prefill 병렬도: ↑입력처리량 / ↑피크메모리 | 긴 컨텍스트 처리 속도 영향)\n" 11 "${USER_PROMPT_CONCURRENCY:-Default}"
-        printf " %2d. Prefill Step Size:  %-15s (prefill 청크: ↑효율 가능 / ↑피크메모리 | 첫 토큰 지연(TTFT) 영향)\n" 12 "${USER_PREFILL_STEP_SIZE:-Default}"
-        printf " %2d. Metal Memory Limit: %-15s (Wired 상한: ↑모델 여유 / ↓시스템 여유 | OOM/스로틀 안정성 영향)\n" 13 "${USER_METAL_MEMORY_LIMIT:-Default}"
-        printf " %2d. Metal Cache Limit:  %-15s (Metal 캐시 상한: ↑재사용 / ↓메모리 회수 | 안정성↔순간속도 균형)\n" 14 "${USER_METAL_CACHE_LIMIT:-Default}"
-        printf " %2d. Prompt Cache Bytes: %-15s (KV 총량 상한: ↑재사용·반복응답↑ / ↑메모리 점유)\n" 15 "${USER_PROMPT_CACHE_BYTES:-Default}"
-        printf " %2d. Advanced Cache:     %-15s (고급 캐시: ON=히트율·재사용↑ / OFF=단순·예측가능)\n" 16 "$USER_ADVANCED_CACHE"
-        printf " %2d. Paged Cache Size:   %-15s (페이지 크기: 작게=정밀재사용 / 크게=관리오버헤드↓)\n" 17 "${USER_PAGE_SIZE:-Default}"
-        printf " %2d. KV Cache Bits:      %-15s (KV 양자화: 4bit 메모리절감↑·품질↓ 가능 / 8bit 균형)\n" 18 "${USER_KV_BITS:-Off}"
-        printf " %2d. KV Group Size:      %-15s (양자화 그룹: 작게=품질↑ / 크게=압축·메모리절감↑)\n" 19 "${USER_KV_GROUP_SIZE:-Default}"
-        printf " %2d. Cache Grace Secs:   %-15s (cold 보호시간: ↑재사용기회 / ↑메모리 체류)\n" 20 "${USER_CACHE_GRACE_SECONDS:-Default}"
-        printf " %2d. Prompt Normalize:   %-15s (입력 정규화: ON=키일관성·캐시히트↑ / OFF=원문보존)\n" 21 "$USER_PROMPT_NORMALIZATION"
-        printf " %2d. Cache Observability:%-15s (캐시 계측로그: ON=병목분석↑ / OFF=로그오버헤드↓)\n" 22 "$USER_CACHE_OBSERVABILITY"
-        printf " %2d. Cache Headroom:     %-15s (목표 여유비율: 낮게=안정↑ / 높게=캐시보존↑)\n" 23 "${USER_CACHE_HEADROOM_RATIO:-Default}"
-        printf " %2d. Light Benchmark:    %-15s (정의: 1회 실측 후 50K 토큰 시간 환산)\n" 24 "Run"
-        printf " %2d. Stream TPS Compare: %-15s (정의: Decode TPS vs E2E TPS 분리 측정)\n" 25 "Run"
-        printf " %2d. 5x Summary Bench:   %-15s (정의: 24/25 기준 5회 반복 통계)\n" 26 "Run"
-        echo "----------------------------------------------------------------------"
-        echo " ── Speculative Decoding & Advanced ──"
-        printf " %2d. Speculative Decode: %-15s (추측 디코딩: ON=Draft 모델로 속도↑ / OFF=표준 생성 | 배칭 불가)\n" 27 "$USER_SPECULATIVE_DECODING"
-        printf " %2d. Draft Model Path:  %-15s (Draft 모델 경로: 로컬 절대경로 또는 HF Repo ID)\n" 28 "${USER_DRAFT_MODEL:-None}"
-        printf " %2d. Num Draft Tokens:  %-15s (Draft 토큰 수: ↑수락률 높은 패턴에 유리 / ↓오버헤드 감소)\n" 29 "${USER_NUM_DRAFT_TOKENS:-3}"
-        printf " %2d. Chat Template Args:%-15s (채팅 템플릿 인자: enable_thinking 등 JSON)\n" 30 "${USER_CHAT_TEMPLATE_ARGS:-'{}'}"
-        echo " ── Tool Integration ──"
-        printf " %2d. Tool Choice Default:%-14s (tool_choice 기본값: auto=모델판단 / none / required)\n" 31 "$USER_TOOL_CHOICE_DEFAULT"
-        printf " %2d. MCP Config Path:   %-15s (MCP 설정 JSON 경로: 클라이언트 tool 통합용)\n" 32 "${USER_MCP_CONFIG_PATH:-None}"
+        printf " %2d. Host:               %-15s\n" 1 "$LISTEN_HOST"
+        printf " %2d. Port:               %-15s\n" 2 "$LISTEN_PORT"
+        printf " %2d. Max Tokens:         %-15s\n" 3 "${USER_MAX:-512}"
+        printf " %2d. Prompt Cache Size:  %-15s\n" 4 "${USER_PROMPT_CACHE_SIZE:-10}"
+        printf " %2d. Prompt Cache Bytes: %-15s\n" 5 "${USER_PROMPT_CACHE_BYTES:-미설정}"
+        printf " %2d. Paged Cache Size:   %-15s\n" 6 "${USER_PAGE_SIZE:-128}"
+        printf " %2d. Decode Concurrency: %-15s\n" 7 "${USER_DECODE_CONCURRENCY:-32}"
+        printf " %2d. Prompt Concurrency: %-15s\n" 8 "${USER_PROMPT_CONCURRENCY:-8}"
+        printf " %2d. Prefill Step Size:  %-15s\n" 9 "${USER_PREFILL_STEP_SIZE:-2048}"
+        printf " %2d. Metal Memory Limit: %-15s\n" 10 "${USER_METAL_MEMORY_LIMIT:-미설정}"
+        printf " %2d. Metal Cache Limit:  %-15s\n" 11 "${USER_METAL_CACHE_LIMIT:-미설정}"
+        printf " %2d. KV Cache Bits:      %-15s\n" 12 "${USER_KV_BITS:-Off}"
+        printf " %2d. KV Group Size:      %-15s\n" 13 "${USER_KV_GROUP_SIZE:-64}"
+        printf " %2d. Cache Grace Secs:   %-15s\n" 14 "${USER_CACHE_GRACE_SECONDS:-15}"
+        printf " %2d. Cache Headroom:     %-15s\n" 15 "${USER_CACHE_HEADROOM_RATIO:-0.80}"
+        printf " %2d. Light Benchmark:    %-15s\n" 16 "Run"
         echo "----------------------------------------------------------------------"
         echo " B. Back to Main Menu"
         echo "----------------------------------------------------------------------"
-        read -p "Select option to edit [1-32, B]: " opt
+        read -p "Select option to edit [1-16, B]: " opt
 
         case "$opt" in
             1)
@@ -806,131 +815,98 @@ menu_options() {
                 set_if_valid_int_range "$input" 1 65535 LISTEN_PORT "Port"
                 ;;
             3)
-                echo "Temperature Guide:"
-                echo "  - 정의: 생성 다양성 제어"
-                echo "  - 상향: 창의성/변동성 증가"
-                echo "  - 하향: 재현성/일관성 증가"
-                echo "  - 권장: 0.0~0.7"
-                read -p "Temperature [$USER_TEMP]: " input
-                set_if_valid_float_range "$input" 0 2 USER_TEMP "Temperature"
-                ;;
-            4)
                 echo "Max Tokens Guide:"
                 echo "  - 정의: 한 요청의 최대 출력 토큰"
                 echo "  - 상향: 장문 완결 가능성 증가"
                 echo "  - 하향: OOM/지연 리스크 감소"
-                echo "  - 팁: 장문 작업 시에만 높이고 기본은 보수적으로 운영"
-                read -p "Max Tokens [$USER_MAX]: " input
+                echo "  - 기본값(업스트림 mlx-lm): 512"
+                echo "  - 제약: prompt_tokens + max_tokens <= 모델 컨텍스트 길이"
+                echo "  - 팁: 잘라짐(length)이 보일 때만 단계적으로 상향"
+                read -p "Max Tokens [${USER_MAX:-512}]: " input
                 set_if_valid_int_range "$input" 1 131072 USER_MAX "Max Tokens"
                 ;;
-            5)
-                echo "Top-P Guide:"
-                echo "  - 정의: 확률 질량 누적 컷오프"
-                echo "  - 상향(1.0 근접): 다양성 증가"
-                echo "  - 하향(0.8~0.95): 보수적/안정적 출력"
-                read -p "Top-P [$USER_TOP_P]: " input
-                set_if_valid_float_range "$input" 0 1 USER_TOP_P "Top-P"
-                ;;
-            6)
-                echo "Top-K Guide:"
-                echo "  - 정의: 상위 K개 후보만 샘플링"
-                echo "  - 상향: 표현 다양성 증가"
-                echo "  - 하향: 출력 패턴 안정화"
-                echo "  - 팁: 0=비활성, 보통 20~100"
-                read -p "Top-K [$USER_TOP_K]: " input
-                set_if_valid_int_range "$input" 0 10000 USER_TOP_K "Top-K"
-                ;;
-            7)
-                echo "Adapter Guide:"
-                echo "  - 정의: LoRA/Adapter 가중치 경로"
-                echo "  - 설정 시: 도메인 특화 성능 향상 가능"
-                echo "  - 비우면: 베이스 모델만 사용"
-                read -p "Adapter Path [$USER_ADAPTER]: " input
-                [[ -n "$input" ]] && USER_ADAPTER="$input"
-                ;;
-            8) edit_log_level ;;
-            9)
+            4)
                 echo "Prompt Cache Size Guide:"
                 echo "  - 정의: 보관할 캐시 엔트리 개수 상한"
                 echo "  - 상향: 반복 요청 히트율 증가 가능"
                 echo "  - 하향: 메타데이터/관리 오버헤드 감소"
                 echo "  - 팁: bytes 상한(prompt-cache-bytes)과 함께 튜닝"
-                read -p "Prompt Cache Size [$USER_PROMPT_CACHE_SIZE]: " input
+                echo "  - 기본값(업스트림 mlx-lm): 10"
+                read -p "Prompt Cache Size [${USER_PROMPT_CACHE_SIZE:-10}]: " input
                 set_if_valid_int_range "$input" 1 1000000 USER_PROMPT_CACHE_SIZE "Prompt Cache Size"
                 ;;
-            10)
-                echo "Decode Concurrency Guide:"
-                echo "  - 정의: 생성 단계 병렬 처리 수"
-                echo "  - 상향: TPS 증가 가능(가장 영향 큼)"
-                echo "  - 하향: 안정성 증가/OOM 리스크 감소"
-                echo "  - 팁: 1 -> 2 -> 4 순차 상승 테스트"
-                read -p "Decode Concurrency [$USER_DECODE_CONCURRENCY]: " input
-                set_if_valid_int_range "$input" 1 1024 USER_DECODE_CONCURRENCY "Decode Concurrency"
-                ;;
-            11)
-                echo "Prompt Concurrency Guide:"
-                echo "  - 정의: prefill 단계 병렬 처리 수"
-                echo "  - 상향: 긴 입력 처리량 개선 가능"
-                echo "  - 하향: 피크 메모리 압력 완화"
-                echo "  - 팁: 긴 컨텍스트가 많을 때 2~4 범위 점검"
-                read -p "Prompt Concurrency [$USER_PROMPT_CONCURRENCY]: " input
-                set_if_valid_int_range "$input" 1 1024 USER_PROMPT_CONCURRENCY "Prompt Concurrency"
-                ;;
-            12)
-                echo "Prefill Step Size Guide:"
-                echo "  - 정의: 긴 프롬프트 prefill 청크 크기"
-                echo "  - 상향(예: 4096): 효율 개선 가능, 피크 메모리 증가 가능"
-                echo "  - 하향(예: 1024): 메모리 피크 완화, 오버헤드 증가 가능"
-                echo "  - 팁: 기본 2048에서 워크로드별 미세조정"
-                read -p "Prefill Step Size [$USER_PREFILL_STEP_SIZE]: " input
-                set_if_valid_int_range "$input" 1 131072 USER_PREFILL_STEP_SIZE "Prefill Step Size"
-                ;;
-            13)
-                echo "Metal Memory Limit Guide:"
-                echo "  - 정의: MLX Wired 메모리 상한"
-                echo "  - 상향: 대형 모델/장문 여유 증가"
-                echo "  - 하향: OS/다른 앱 여유 증가"
-                echo "  - 팁: 반드시 단위 포함 (예: 96GB, 100GB)"
-                read -p "Metal Memory Limit [$USER_METAL_MEMORY_LIMIT]: " input
-                set_if_valid_size "$input" USER_METAL_MEMORY_LIMIT "Metal Memory Limit"
-                ;;
-            14)
-                echo "Metal Cache Limit Guide:"
-                echo "  - 정의: Metal 임시 캐시 상한"
-                echo "  - 상향: 재할당 감소로 속도 안정 가능"
-                echo "  - 하향: 메모리 회수 빨라져 OOM 완화"
-                echo "  - 팁: 4GB -> 6GB -> 8GB 순으로 균형 탐색"
-                read -p "Metal Cache Limit  [$USER_METAL_CACHE_LIMIT]: " input
-                set_if_valid_size "$input" USER_METAL_CACHE_LIMIT "Metal Cache Limit"
-                ;;
-            15)
+            5)
                 echo "Prompt Cache Bytes Guide:"
                 echo "  - 정의: KV/Prompt 캐시 총량 바이트 상한"
                 echo "  - 상향: 캐시 히트율/반복 응답 속도 개선 가능"
                 echo "  - 하향: 피크 메모리 급증 방지"
-                echo "  - 팁: 12GB~24GB 범위에서 단위 포함 입력"
-                read -p "Prompt Cache Bytes (e.g. 24GB) [$USER_PROMPT_CACHE_BYTES]: " input
+                echo "  - 기본값(업스트림 mlx-lm): 미설정(None)"
+                echo "  - 미입력: --prompt-cache-bytes 미전달(바이트 상한 없음, 엔트리 개수만 상한)"
+                echo "  - 팁: 메모리 압박/크래시가 있으면 먼저 bytes 상한을 설정"
+                read -p "Prompt Cache Bytes (e.g. 24GB) [${USER_PROMPT_CACHE_BYTES:-미설정}]: " input
                 set_if_valid_size "$input" USER_PROMPT_CACHE_BYTES "Prompt Cache Bytes"
                 ;;
-            16)
-                toggle_advanced_cache
-                echo "Advanced Cache: $USER_ADVANCED_CACHE"
-                echo "  - 정의: 콘텐츠 기반 고급 캐시 엔진 사용 여부"
-                echo "  - ON: 반복/유사 요청에서 캐시 히트율 상승 가능 -> 평균 TPS 개선 가능"
-                echo "  - OFF: 동작 단순화, 디버깅/재현성은 좋아질 수 있으나 재사용 이점 감소"
-                echo "  - 팁: 동일 프롬프트 재요청이 많은 워크로드면 ON 권장"
-                sleep 1
-                ;;
-            17) 
+            6) 
                 echo "Page Size Guide:"
                 echo "  - 정의: 캐시 블록 인덱싱 토큰 단위"
                 echo "  - 작게(예: 64): 재사용 정밀도 상승"
                 echo "  - 크게(예: 256): 관리 오버헤드 감소"
                 echo "  - 팁: 기본 128, 반복/유사 요청 많으면 256도 테스트"
-                read -p "Page Size (Tokens) [$USER_PAGE_SIZE]: " input
+                read -p "Page Size (Tokens) [${USER_PAGE_SIZE:-128}]: " input
                 set_if_valid_int_range "$input" 16 4096 USER_PAGE_SIZE "Paged Cache Size"
                 ;;
-            18)
+            7)
+                echo "Decode Concurrency Guide:"
+                echo "  - 정의: 생성 단계 병렬 처리 수"
+                echo "  - 상향: TPS 증가 가능(가장 영향 큼)"
+                echo "  - 하향: 안정성 증가/OOM 리스크 감소"
+                echo "  - 기본값(업스트림 mlx-lm): 32"
+                echo "  - 팁: 안정성 우선이면 낮게 시작해 단계적으로 상향(문제 발생 시 즉시 롤백)"
+                read -p "Decode Concurrency [${USER_DECODE_CONCURRENCY:-32}]: " input
+                set_if_valid_int_range "$input" 1 1024 USER_DECODE_CONCURRENCY "Decode Concurrency"
+                ;;
+            8)
+                echo "Prompt Concurrency Guide:"
+                echo "  - 정의: prefill 단계 병렬 처리 수"
+                echo "  - 상향: 긴 입력 처리량 개선 가능"
+                echo "  - 하향: 피크 메모리 압력 완화"
+                echo "  - 기본값(업스트림 mlx-lm): 8"
+                echo "  - 팁: TTFT/메모리 압박이 오면 먼저 하향"
+                read -p "Prompt Concurrency [${USER_PROMPT_CONCURRENCY:-8}]: " input
+                set_if_valid_int_range "$input" 1 1024 USER_PROMPT_CONCURRENCY "Prompt Concurrency"
+                ;;
+            9)
+                echo "Prefill Step Size Guide:"
+                echo "  - 정의: 긴 프롬프트 prefill 청크 크기"
+                echo "  - 상향(예: 4096): 효율 개선 가능, 피크 메모리 증가 가능"
+                echo "  - 하향(예: 1024): 메모리 피크 완화, 오버헤드 증가 가능"
+                echo "  - 기본값(업스트림 mlx-lm): 2048"
+                echo "  - 팁: 장문·동시성이 높을수록 보수적으로(상향은 피크 메모리와 트레이드오프)"
+                read -p "Prefill Step Size [${USER_PREFILL_STEP_SIZE:-2048}]: " input
+                set_if_valid_int_range "$input" 1 131072 USER_PREFILL_STEP_SIZE "Prefill Step Size"
+                ;;
+            10)
+                echo "Metal Memory Limit Guide:"
+                echo "  - 정의: MLX Wired 메모리 상한"
+                echo "  - 상향: 대형 모델/장문 여유 증가"
+                echo "  - 하향: OS/다른 앱 여유 증가"
+                echo "  - 미입력: --metal-memory-limit 미전달(장치 권장 Wired 한도)"
+                echo "  - 팁: 반드시 단위 포함 (예: 96GB, 100GB)"
+                echo "  - 주의: 이 값은 mlx-server에서 MLX Wired limit에 영향을 주는 운영용 옵션"
+                read -p "Metal Memory Limit [${USER_METAL_MEMORY_LIMIT:-미설정}]: " input
+                set_if_valid_size "$input" USER_METAL_MEMORY_LIMIT "Metal Memory Limit"
+                ;;
+            11)
+                echo "Metal Cache Limit Guide:"
+                echo "  - 정의: Metal 임시 캐시 상한"
+                echo "  - 상향: 재할당 감소로 속도 안정 가능"
+                echo "  - 하향: 메모리 회수 빨라져 OOM 완화"
+                echo "  - 미입력: --metal-cache-limit 미전달(MLX 기본 캐시 동작)"
+                echo "  - 팁: 크래시/메모리 압박이 있으면 하향, 지연 변동이 크면 상향을 검토"
+                read -p "Metal Cache Limit [${USER_METAL_CACHE_LIMIT:-미설정}]: " input
+                set_if_valid_size "$input" USER_METAL_CACHE_LIMIT "Metal Cache Limit"
+                ;;
+            12)
                 echo "KV Cache Bits Guide:"
                 echo "  - 정의: KV 캐시 양자화 정밀도(4/8bit)"
                 echo "  - 4bit: 메모리 절감 폭 최대 -> OOM 완화/동시성 확대에 유리"
@@ -939,150 +915,37 @@ menu_options() {
                 echo "  - 토큰 생성 영향: 메모리 압박이 줄면 스로틀/중단 감소로 실효 TPS 개선 가능"
                 edit_kv_bits
                 ;;
-            19) 
+            13) 
                 echo "KV Group Size Guide:"
                 echo "  - 정의: KV 양자화 그룹 크기"
+                echo "  - 미입력(빈 값): 서버 기본 64 (--kv-group-size 미전달)"
                 echo "  - 작게(예: 32): 품질/정밀도 유리"
                 echo "  - 크게(예: 64~128): 압축 효율 유리"
                 echo "  - 팁: kv-bits=8이면 32/64를 우선 비교"
-                read -p "KV Group Size [$USER_KV_GROUP_SIZE]: " input
+                read -p "KV Group Size [${USER_KV_GROUP_SIZE:-64}]: " input
                 set_if_valid_int_range "$input" 1 1024 USER_KV_GROUP_SIZE "KV Group Size"
                 ;;
-            20)
+            14)
                 echo "Cache Grace Seconds Guide:"
                 echo "  - 정의: 신규 cold 블록 최소 보존 시간(초)"
                 echo "  - 상향: 재사용 기회 증가, 메모리 체류 증가"
                 echo "  - 하향: 빠른 회수, 재계산 증가 가능"
-                echo "  - 팁: 10~30초 범위에서 시작"
-                read -p "Cache Grace Seconds [$USER_CACHE_GRACE_SECONDS]: " input
+                echo "  - 입력 허용 범위(run.sh 검증): 0~600 (미입력 시 서버 기본 15)"
+                read -p "Cache Grace Seconds [${USER_CACHE_GRACE_SECONDS:-15}]: " input
                 set_if_valid_float_range "$input" 0 600 USER_CACHE_GRACE_SECONDS "Cache Grace Seconds"
                 ;;
-            21)
-                toggle_prompt_normalization
-                echo "Prompt Normalize: $USER_PROMPT_NORMALIZATION"
-                echo "  - 정의: 입력 공백/개행 정규화"
-                echo "  - ON: 캐시 키 일관성 상승, 히트율 개선 가능"
-                echo "  - OFF: 원문 보존"
-                echo "  - 토큰 생성 영향: 히트율 상승 시 prefill 비용이 줄어 TTFT/평균 응답시간 개선 가능"
-                sleep 1
-                ;;
-            22)
-                toggle_cache_observability
-                echo "Cache Observability: $USER_CACHE_OBSERVABILITY"
-                echo "  - 정의: 캐시 진단/통계 로그 수준"
-                echo "  - ON: 병목/축출 원인 파악에 유리"
-                echo "  - OFF: 로그 오버헤드 최소화"
-                echo "  - 토큰 생성 영향: ON은 미세한 로깅 오버헤드가 있을 수 있어 극한 TPS 벤치에서 불리할 수 있음"
-                sleep 1
-                ;;
-            23)
+            15)
                 echo "Cache Headroom Ratio Guide:"
-                echo "  - 정의: 메모리 압박 시 목표 여유 비율"
-                echo "  - 낮게(예: 0.75): 안정성↑, 캐시 보존량↓"
-                echo "  - 높게(예: 0.85): 히트율↑ 가능, 압박 리스크↑"
-                echo "  - 권장 범위: 0.70 ~ 0.90"
-                read -p "Cache Headroom Ratio [$USER_CACHE_HEADROOM_RATIO]: " input
-                set_if_valid_float_range "$input" 0.50 0.95 USER_CACHE_HEADROOM_RATIO "Cache Headroom Ratio"
+                echo "  - 정의: 메모리 압박 시 목표 여유 비율(사용량 비율 상한을 이 값 아래로 유지)"
+                echo "  - 낮게(예: 0.65): 더 공격적으로 비워 안정성↑, 캐시 보존량↓"
+                echo "  - 높게(예: 0.80): 덜 비워 히트율↑ 가능(기본과 동일)"
+                echo "  - 제약: 내부 soft limit(0.85) 미만이어야 압박 시 eviction이 의미 있게 동작"
+                echo "  - 입력 허용 범위(run.sh 검증): 0.50 ~ 0.84 (미입력 시 서버 기본 0.80)"
+                read -p "Cache Headroom Ratio [${USER_CACHE_HEADROOM_RATIO:-0.80}]: " input
+                set_if_valid_float_range "$input" 0.50 0.84 USER_CACHE_HEADROOM_RATIO "Cache Headroom Ratio"
                 ;;
-            24)
+            16)
                 run_light_benchmark_50k
-                ;;
-            25)
-                run_stream_decode_benchmark_50k
-                ;;
-            26)
-                run_repeat_benchmark_5x
-                ;;
-            27)
-                toggle_speculative_decoding
-                echo "Speculative Decoding: $USER_SPECULATIVE_DECODING"
-                echo "  - 정의: Draft(소형) 모델이 토큰 후보를 빠르게 생성하고 Target(대형) 모델이 검증"
-                echo "  - ON 효과: 생성 속도 향상 가능 (코딩 등 예측 가능한 패턴에서 특히 효과적)"
-                echo "  - OFF 효과: 표준 디코딩, continuous batching 가능"
-                echo "  - ⚠ ON 시 continuous batching(동시 요청 배칭)은 자동 비활성화됩니다"
-                if [[ "$USER_SPECULATIVE_DECODING" == "true" && -z "$USER_DRAFT_MODEL" ]]; then
-                    echo "  ⚠ Draft Model Path가 설정되지 않았습니다. 28번에서 설정하세요."
-                fi
-                sleep 1
-                ;;
-            28)
-                echo "Draft Model Path Guide:"
-                echo "  - 정의: Speculative Decoding에 사용할 소형 Draft 모델 경로"
-                echo "  - 로컬 경로 예: ~/Desktop/models/Qwen3-1.7B-4bit"
-                echo "  - HF Repo ID 예: mlx-community/Qwen3-1.7B-4bit"
-                echo "  - 주의: Target 모델과 동일한 토크나이저(vocab_size)를 공유해야 합니다"
-                echo "  - 권장: Target 크기의 1/10~1/30 크기 (예: 30B Target → 1~3B Draft)"
-                read -p "Draft Model Path [${USER_DRAFT_MODEL:-None}]: " input
-                if [[ -n "$input" ]]; then
-                    USER_DRAFT_MODEL="$input"
-                fi
-                ;;
-            29)
-                echo "Num Draft Tokens Guide:"
-                echo "  - 정의: Draft 모델이 한 번에 생성할 후보 토큰 수"
-                echo "  - 상향(16~20): 코딩/보일러플레이트 등 예측 가능한 패턴에서 효과적"
-                echo "  - 하향(3~5): 짧은 응답이나 큰 Draft 모델(>7B)일 때 적합"
-                echo "  - 권장 범위: 코딩 16~20, 추론 8~12, 짧은 응답 3~5"
-                read -p "Num Draft Tokens [${USER_NUM_DRAFT_TOKENS:-3}]: " input
-                set_if_valid_int_range "$input" 1 64 USER_NUM_DRAFT_TOKENS "Num Draft Tokens"
-                ;;
-            30)
-                echo "Chat Template Args Guide:"
-                echo "  - 정의: 토크나이저 apply_chat_template에 전달할 JSON 인자"
-                echo "  - 예: {\"enable_thinking\":true}  → 모델 reasoning/thinking 모드 활성화"
-                echo "  - 예: {\"enable_thinking\":false} → thinking 비활성화 (빠른 응답)"
-                echo "  - 빈 값: 기본 템플릿 동작 유지"
-                echo "  - 현재: ${USER_CHAT_TEMPLATE_ARGS:-'{}'}"
-                read -p "Chat Template Args (JSON): " input
-                if [[ -n "$input" ]]; then
-                    if python3 -c "import json; json.loads('$input')" 2>/dev/null; then
-                        USER_CHAT_TEMPLATE_ARGS="$input"
-                    else
-                        echo "❌ 유효한 JSON 형식이 아닙니다. 예: {\"enable_thinking\":true}"
-                        sleep 1
-                    fi
-                fi
-                ;;
-            31)
-                echo "Tool Choice Default Guide:"
-                echo "  - 정의: 클라이언트가 tool_choice를 지정하지 않았을 때 서버가 주입할 기본값"
-                echo "  - auto: 모델이 tool 호출 여부를 자율 판단 (OpenAI 기본값)"
-                echo "  - none: tool 호출을 하지 않고 텍스트만 생성"
-                echo "  - required: 반드시 tool을 호출 (tool이 없으면 에러)"
-                echo "  - 주의: 요청에 tools 배열이 있을 때만 적용됩니다"
-                echo "  현재: $USER_TOOL_CHOICE_DEFAULT"
-                echo ""
-                echo "  1. auto     (모델 자율 판단 — 권장)"
-                echo "  2. none     (tool 호출 비활성화)"
-                echo "  3. required (tool 호출 강제)"
-                read -p "Select [1-3]: " input
-                case "$input" in
-                    1) USER_TOOL_CHOICE_DEFAULT="auto" ;;
-                    2) USER_TOOL_CHOICE_DEFAULT="none" ;;
-                    3) USER_TOOL_CHOICE_DEFAULT="required" ;;
-                esac
-                ;;
-            32)
-                echo "MCP Config Path Guide:"
-                echo "  - 정의: MCP(Model Context Protocol) 설정 JSON 파일 경로"
-                echo "  - 용도: 서버가 GET /v1/mlx/mcp-config 엔드포인트로 설정을 노출"
-                echo "  - 클라이언트(Cursor, Continue 등)가 이 엔드포인트를 조회하여 tool 서버 목록을 가져감"
-                echo "  - 예: ~/.mcp.json, ~/projects/.mcp.json"
-                echo "  - 빈 값: MCP config 엔드포인트 비활성"
-                read -p "MCP Config Path [${USER_MCP_CONFIG_PATH:-None}]: " input
-                if [[ -n "$input" ]]; then
-                    local expanded="${input/#\~/$HOME}"
-                    if [[ -f "$expanded" ]]; then
-                        USER_MCP_CONFIG_PATH="$input"
-                        echo "✅ MCP Config 설정 완료: $input"
-                    else
-                        echo "⚠ 파일이 존재하지 않습니다: $expanded"
-                        read -p "그래도 설정하시겠습니까? [y/N]: " confirm
-                        if [[ "$confirm" =~ ^[Yy]$ ]]; then
-                            USER_MCP_CONFIG_PATH="$input"
-                        fi
-                    fi
-                fi
                 ;;
             [Bb]) save_config; return ;;
             *) echo "Invalid selection."; sleep 1 ;;
@@ -1124,10 +987,10 @@ toggle_advanced_cache() {
 
 edit_kv_bits() {
     echo ""
-    echo "KV Cache Quantization:"
-    echo "  1. 4-bit  (75% VRAM saved, recommended for 100B+ models)"
-    echo "  2. 8-bit  (50% VRAM saved, higher precision)"
-    echo "  3. Off    (FP16, full precision)"
+    echo "KV Cache Quantization (KV 캐시 양자화):"
+    echo "  1. 4-bit  (메모리 절감 폭 최대, 품질 저하 가능)"
+    echo "  2. 8-bit  (절감/품질 균형, 운영 기본값으로 추천)"
+    echo "  3. Off    (FP16, 품질 우선 / 메모리 사용량 증가)"
     echo ""
     echo "Current: ${USER_KV_BITS:-Off}"
     read -p "Select [1-3]: " input
@@ -1145,7 +1008,7 @@ edit_log_level() {
     for i in "${!levels[@]}"; do
         printf "  %d. %s\n" "$((i+1))" "${levels[$i]}"
     done
-    read -p "Select level [Current: $USER_LOG]: " input
+    read -p "Select level [Current: ${USER_LOG:-INFO}]: " input
     if [[ "$input" =~ ^[1-5]$ ]]; then
         USER_LOG="${levels[$((input-1))]}"
     fi
@@ -1271,6 +1134,7 @@ main() {
     fi
 
     load_config
+
 
     while true; do
         show_header

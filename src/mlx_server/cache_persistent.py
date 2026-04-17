@@ -32,6 +32,7 @@ class PersistentCacheLayer:
             max_disk_bytes if max_disk_bytes is not None else self._DEFAULT_DISK_LIMIT
         )
         self.executor = ThreadPoolExecutor(max_workers=4)
+        self._executor_shutdown = False
         self.last_write_time: dict[str, float] = {}
         self.write_cooldown = 1.0  # 동일 블록에 대한 스왑 쿨다운 (초)
         logger.info(
@@ -41,6 +42,14 @@ class PersistentCacheLayer:
         )
         # 서버 시작 시 1회 GC — 이전 실행에서 누적된 파일 정리
         self._enforce_disk_limit()
+
+    def shutdown(self, *, wait: bool = False, cancel_futures: bool = True) -> None:
+        """ThreadPoolExecutor 정리. 미호출 시 인터프리터 종료(atexit)에서 join이 막혀
+        Ctrl+C 직후 ``KeyboardInterrupt`` 잔음이 남을 수 있다."""
+        if self._executor_shutdown:
+            return
+        self._executor_shutdown = True
+        self.executor.shutdown(wait=wait, cancel_futures=cancel_futures)
 
     # ------------------------------------------------------------------
     # Serialization helpers

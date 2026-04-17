@@ -22,6 +22,10 @@ def test_effective_inference_params_merges_like_server() -> None:
         top_p=1.0,
         top_k=0,
         min_p=0.0,
+        repetition_penalty=0.0,
+        repetition_context_size=20,
+        presence_penalty=0.0,
+        presence_context_size=20,
     )
     body = {"max_tokens": 128, "temperature": 0.7}
     eff = effective_inference_params(body, ns)
@@ -38,6 +42,10 @@ def test_effective_max_completion_tokens() -> None:
         top_p=1.0,
         top_k=0,
         min_p=0.0,
+        repetition_penalty=0.0,
+        repetition_context_size=20,
+        presence_penalty=0.0,
+        presence_context_size=20,
     )
     body = {"max_completion_tokens": 64}
     eff = effective_inference_params(body, ns)
@@ -87,6 +95,7 @@ def test_audit_jsonl(tmp_path: Path) -> None:
         server_runtime={"decode_concurrency": 32},
         priority=None,
     )
+    trail.flush()
     line = logf.read_text(encoding="utf-8").strip()
     rec = json.loads(line)
     assert rec["schema"] == "mlx_server.inference_audit.v1"

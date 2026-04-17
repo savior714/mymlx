@@ -23,7 +23,31 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "pytest>=9.0.3",
+    "ruff>=0.15.11",
+    "ty>=0.0.31",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ty.environment]
+python-version = "3.12"
+
+# mlx-lm·믹스인 패턴으로 인한 오탐이 많아 우선 경고로 두고, 점진적으로 수정·좁힌다.
+[tool.ty.rules]
+invalid-argument-type = "warn"
+invalid-assignment = "warn"
+invalid-parameter-default = "warn"
+invalid-return-type = "warn"
+missing-typed-dict-key = "warn"
+unknown-argument = "warn"
+unresolved-attribute = "warn"
+unresolved-import = "warn"
+unsupported-operator = "warn"
+
+[tool.ty.terminal]
+error-on-warning = false

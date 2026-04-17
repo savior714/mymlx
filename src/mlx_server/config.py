@@ -32,6 +32,10 @@ def _mlx_defaults() -> dict[str, Any]:
         "top_p": 1.0,
         "top_k": 0,
         "min_p": 0.0,
+        "repetition_penalty": 0.0,
+        "repetition_context_size": 20,
+        "presence_penalty": 0.0,
+        "presence_context_size": 20,
         "max_tokens": 512,
         "chat_template_args": {},
         "decode_concurrency": 32,
@@ -89,6 +93,14 @@ def _env_mlx_overrides() -> dict[str, Any]:
         o["top_k"] = int(v)
     if v := env.get(f"{_ENV_PREFIX}MIN_P"):
         o["min_p"] = float(v)
+    if v := env.get(f"{_ENV_PREFIX}REPETITION_PENALTY"):
+        o["repetition_penalty"] = float(v)
+    if v := env.get(f"{_ENV_PREFIX}REPETITION_CONTEXT_SIZE"):
+        o["repetition_context_size"] = int(v)
+    if v := env.get(f"{_ENV_PREFIX}PRESENCE_PENALTY"):
+        o["presence_penalty"] = float(v)
+    if v := env.get(f"{_ENV_PREFIX}PRESENCE_CONTEXT_SIZE"):
+        o["presence_context_size"] = int(v)
     if v := env.get(f"{_ENV_PREFIX}MAX_TOKENS"):
         o["max_tokens"] = int(v)
     if v := env.get(f"{_ENV_PREFIX}CHAT_TEMPLATE_ARGS"):

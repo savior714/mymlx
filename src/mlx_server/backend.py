@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import functools
+import json
 import logging
+import re
 import threading
 from argparse import Namespace
 from dataclasses import dataclass
@@ -21,6 +23,121 @@ from mlx_lm.server import (
 
 logger = logging.getLogger(__name__)
 
+
+_GEMMA4_HYPHEN_CALL_RE = re.compile(r"call:([A-Za-z0-9_-]+)(\{.*\})", re.DOTALL)
+_GEMMA4_THOUGHT_TOKEN_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\s*<\|\"\|>\s*")
+_LOOSE_BOOL_INT_RE = re.compile(
+    r"(?P<key>[A-Za-z_][A-Za-z0-9_]*)\s*:\s*(?P<value>true|false|-?\d+)\b"
+)
+_LOOSE_STRING_RE = re.compile(
+    r"(?P<key>[A-Za-z_][A-Za-z0-9_]*)\s*:\s*(?P<q>\"|')(?P<value>.*?)(?P=q)\s*(?=,|$)",
+    re.DOTALL,
+)
+_LOOSE_ANGLE_QUOTE_STRING_RE = re.compile(
+    r'(?P<key>[A-Za-z_][A-Za-z0-9_]*)\s*:\s*<\|"\|>(?P<value>.*?)<\|"\|>\s*(?=,|$)',
+    re.DOTALL,
+)
+_LOOSE_THOUGHT_RE = re.compile(
+    r"thought\s*:\s*(?P<value>.*?)(?=,\s*(?:nextThoughtNeeded|thoughtNumber|totalThoughts)\s*:|\s*}$)",
+    re.DOTALL,
+)
+
+
+def _normalize_gemma4_args(args_str: str) -> str:
+    """Normalize common malformed Gemma-style argument fragments."""
+    normalized = _GEMMA4_THOUGHT_TOKEN_RE.sub(r"\1:", args_str)
+    normalized = normalized.replace('<|"|>', '"')
+    return normalized
+
+
+def _normalize_tool_arguments(arguments: dict) -> dict:
+    """Normalize parsed tool argument aliases without changing semantics."""
+    if "needsMoreThoughts" in arguments:
+        if "nextThoughtNeeded" not in arguments:
+            arguments["nextThoughtNeeded"] = arguments["needsMoreThoughts"]
+        arguments.pop("needsMoreThoughts", None)
+    return arguments
+
+
+def _parse_loose_tool_arguments(args_str: str) -> dict | None:
+    """Best-effort parser for malformed pseudo-JSON argument payloads.
+
+    Some models emit unquoted multiline text (mostly in `thought`) which breaks
+    strict JSON conversion. Recover primitive fields and keep `thought` as text.
+    """
+    body = args_str.strip()
+    if body.startswith("{") and body.endswith("}"):
+        body = body[1:-1]
+
+    parsed: dict[str, object] = {}
+
+    thought_match = _LOOSE_THOUGHT_RE.search(body)
+    if thought_match:
+        thought_raw = thought_match.group("value").strip()
+        thought_clean = thought_raw.replace('<|"|>', '"').strip().strip('"')
+        if thought_clean:
+            parsed["thought"] = thought_clean
+
+    for m in _LOOSE_BOOL_INT_RE.finditer(body):
+        key = m.group("key")
+        if key in parsed:
+            # Keep first occurrence when malformed output duplicates keys.
+            continue
+        value_str = m.group("value")
+        if value_str in ("true", "false"):
+            parsed[key] = value_str == "true"
+        else:
+            try:
+                parsed[key] = int(value_str)
+            except ValueError:
+                continue
+
+    for m in _LOOSE_STRING_RE.finditer(body):
+        key = m.group("key")
+        if key in parsed:
+            continue
+        value = m.group("value").replace('<|"|>', '"').strip()
+        if value != "":
+            parsed[key] = value
+
+    for m in _LOOSE_ANGLE_QUOTE_STRING_RE.finditer(body):
+        key = m.group("key")
+        if key in parsed:
+            continue
+        value = m.group("value").strip()
+        if value != "":
+            parsed[key] = value
+
+    if isinstance(parsed.get("thought"), str) and parsed["thought"].strip() == "":
+        parsed.pop("thought", None)
+
+    return _normalize_tool_arguments(parsed) if parsed else None
+
+
+def _parse_hyphenated_tool_call(tool_text: str) -> dict | None:
+    """Best-effort parser for Gemma-style tool calls with hyphenated names."""
+    m = _GEMMA4_HYPHEN_CALL_RE.search(tool_text)
+    if not m:
+        return None
+
+    func_name = m.group(1)
+    args_str = m.group(2)
+    try:
+        # Reuse upstream converter for Gemma4 pseudo-JSON format.
+        from mlx_lm.tool_parsers.gemma4 import _gemma4_args_to_json
+
+        normalized_args = _normalize_gemma4_args(args_str)
+        arguments = json.loads(_gemma4_args_to_json(normalized_args))
+        if isinstance(arguments, dict):
+            arguments = _normalize_tool_arguments(arguments)
+        else:
+            return None
+    except Exception:
+        arguments = _parse_loose_tool_arguments(args_str)
+        if not isinstance(arguments, dict):
+            return None
+    return {"name": func_name, "arguments": arguments}
+
 # ... (PriorityAwareAPIHandler stays here as it's coupled with APIHandler) ...
 class PriorityAwareAPIHandler(APIHandler):
     """
@@ -30,7 +147,12 @@ class PriorityAwareAPIHandler(APIHandler):
     def handle(self):
         # Reset priority for this thread
         set_priority(None)
-        super().handle()
+        try:
+            super().handle()
+        except (BrokenPipeError, ConnectionResetError):
+            # Client disconnected (or shutdown in progress) during streaming write.
+            # Avoid noisy traceback for expected network tear-down scenarios.
+            logger.info("Client connection closed while streaming response")
 
     def parse_request(self) -> bool:
         if super().parse_request():
@@ -129,6 +251,20 @@ def _patch_tool_call_formatter() -> None:
             try:
                 return original_call(self, tool_calls)
             except ValueError as exc:
+                if tool_calls:
+                    recovered: list[dict] = []
+                    for raw in tool_calls:
+                        parsed = _parse_hyphenated_tool_call(raw)
+                        if parsed is None:
+                            recovered = []
+                            break
+                        recovered.append(self._format(parsed))
+                    if recovered:
+                        logger.info(
+                            "Recovered malformed tool call via hyphen parser: %d call(s)",
+                            len(recovered),
+                        )
+                        return recovered
                 logger.warning(
                     "Tool call parsing failed (malformed model output): %s. "
                     "Returning empty tool_calls. Raw segments: %r",
@@ -226,6 +362,26 @@ def _check_speculative_compat(model_provider: ModelProvider) -> bool:
         return True
 
 
+def _patch_inference_tracking(rg: ResponseGenerator, pc: AdvancedPromptCache) -> None:
+    """Wrap ResponseGenerator.generate to track long-running inference sessions."""
+    original_generate = rg.generate
+
+    def _wrapped_generate(*args, **kwargs):
+        pc._mark_inference_start()
+        ctx, response = original_generate(*args, **kwargs)
+
+        def _response_wrapper():
+            try:
+                yield from response
+            finally:
+                pc._mark_inference_end()
+
+        return ctx, _response_wrapper()
+
+    rg.generate = _wrapped_generate
+    logger.info("Inference tracking patch applied to ResponseGenerator")
+
+
 def start_backend(mlx_args: Namespace) -> MlxBackend:
     """Wire Metal limits, build ModelProvider + ResponseGenerator, start internal httpd."""
     _patch_tool_call_formatter()
@@ -278,7 +434,12 @@ def start_backend(mlx_args: Namespace) -> MlxBackend:
     else:
         prompt_cache = SafeguardPromptCache(**cache_kwargs)
         logger.info("Using standard SafeguardPromptCache (Advanced Cache disabled)")
+    
     response_generator = ResponseGenerator(model_provider, prompt_cache)
+    
+    # Apply inference tracking if using AdvancedPromptCache
+    if isinstance(prompt_cache, AdvancedPromptCache):
+        _patch_inference_tracking(response_generator, prompt_cache)
 
     ready = threading.Event()
     holder: list = []

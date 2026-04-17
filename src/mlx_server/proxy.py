@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -20,6 +19,7 @@ from mlx_server.inference_audit import (
     resolve_request_id,
     server_runtime_snapshot,
 )
+from mlx_server.request_transformer import MlxRequestTransformer
 
 if TYPE_CHECKING:
     from mlx_server.backend import MlxBackend
@@ -61,10 +61,31 @@ def _log_inference_audit_complete(
     *,
     upstream_status: int | None,
     outcome: str,
+    usage: dict[str, int] | None = None,
 ) -> None:
     if audit is None or audit_ctx is None or not audit.enabled:
+        # Update tracker even if file logging is disabled
+        if usage:
+            _dummy = InferenceAuditTrail(None, None)
+            stats = _dummy.log_complete(
+                request_id="",
+                path="",
+                model_resolved=None,
+                upstream_status=None,
+                outcome="",
+                effective={},
+                prompt_stats={},
+                server_runtime={},
+                priority=None,
+                usage=usage,
+            )
+            if stats and stats.get("should_report"):
+                _metrics_log.info(
+                    f"[SUMMARY] Total Requests: {stats['total_requests']} | "
+                    f"Avg Tokens: {stats['avg_prompt_tokens']} prompt, {stats['avg_completion_tokens']} completion"
+                )
         return
-    audit.log_complete(
+    stats = audit.log_complete(
         request_id=audit_ctx["request_id"],
         path=audit_ctx["path"],
         model_resolved=audit_ctx["model_resolved"],
@@ -74,7 +95,13 @@ def _log_inference_audit_complete(
         prompt_stats=audit_ctx["prompt_stats"],
         server_runtime=audit_ctx["server_runtime"],
         priority=audit_ctx["priority"],
+        usage=usage,
     )
+    if stats and stats.get("should_report"):
+        _metrics_log.info(
+            f"[SUMMARY] Total Requests: {stats['total_requests']} | "
+            f"Avg Tokens: {stats['avg_prompt_tokens']} prompt, {stats['avg_completion_tokens']} completion"
+        )
 
 
 def _prepare_inference_audit(
@@ -120,6 +147,9 @@ def _prepare_inference_audit(
 
 _metrics_log = logging.getLogger("mlx_server.metrics")
 
+_SSE_CONTENT_PROBE = '"content":'
+_SSE_USAGE_PROBE = '"completion_tokens":'
+
 
 def _log_request_metrics(
     *,
@@ -146,8 +176,6 @@ def _log_request_metrics(
     parts.append(f"{total_time:.1f}s total")
     _metrics_log.info("    ".join(parts))
 
-
-from mlx_server.request_transformer import MlxRequestTransformer
 
 # Backward compatibility for internal helpers used by tests
 _normalize_chat_messages_for_mlx = MlxRequestTransformer.normalize_chat_messages
@@ -199,25 +227,20 @@ async def proxy_to_mlx(
                 data = parsed
 
         if data is not None:
-            mutated = MlxRequestTransformer.transform(
+            MlxRequestTransformer.transform(
                 path, data, backend.mlx_args, backend.model_provider.model_key
             )
-
             if data.get("stream"):
                 so = data.setdefault("stream_options", {})
                 if isinstance(so, dict):
                     so.setdefault("include_usage", True)
-                    mutated = True
 
-            priority = data.get("priority")
-            if priority is not None:
-                headers["X-MLX-Priority"] = str(priority)
-
-            # Audit Snapshot
+            # Audit Snapshot (non-blocking — queued to background)
             audit, audit_ctx = _prepare_inference_audit(request, path, data, backend)
 
-            if mutated:
-                body = json.dumps(data).encode("utf-8")
+            # Direct inference path — call ResponseGenerator in-process
+            from mlx_server.direct_inference import handle_direct_inference
+            return await handle_direct_inference(request, backend, data)
 
     try:
         req = client.build_request(request.method, target, headers=headers, content=body)
@@ -285,6 +308,8 @@ async def proxy_to_mlx(
         interrupted = False
         t_first_token: float | None = None
         token_count = 0
+        prompt_toks: int | None = None
+        compl_toks: int | None = None
         usage_data: dict | None = None
         non_sse_buf = bytearray() if (is_inference and not is_sse) else None
 
@@ -298,20 +323,19 @@ async def proxy_to_mlx(
                                 stripped = line.strip()
                                 if not stripped.startswith("data: ") or stripped == "data: [DONE]":
                                     continue
-                                try:
-                                    evt = json.loads(stripped[6:])
-                                except (json.JSONDecodeError, ValueError):
-                                    continue
-                                choices = evt.get("choices")
-                                if choices and isinstance(choices, list) and choices:
-                                    delta = choices[0].get("delta", {})
-                                    if delta.get("content"):
-                                        token_count += 1
-                                        if t_first_token is None:
-                                            t_first_token = time.monotonic()
-                                u = evt.get("usage")
-                                if isinstance(u, dict) and u.get("completion_tokens"):
-                                    usage_data = u
+                                payload = stripped[6:]
+                                if _SSE_CONTENT_PROBE in payload:
+                                    token_count += 1
+                                    if t_first_token is None:
+                                        t_first_token = time.monotonic()
+                                if _SSE_USAGE_PROBE in payload:
+                                    try:
+                                        evt = json.loads(payload)
+                                        u = evt.get("usage")
+                                        if isinstance(u, dict) and u.get("completion_tokens"):
+                                            usage_data = u
+                                    except (json.JSONDecodeError, ValueError):
+                                        pass
                         except Exception:
                             pass
                     elif non_sse_buf is not None:
@@ -326,7 +350,6 @@ async def proxy_to_mlx(
             if is_inference:
                 total_elapsed = time.monotonic() - start_time
                 ttft = (t_first_token - start_time) if t_first_token is not None else None
-                prompt_toks: int | None = None
                 compl_toks = token_count
 
                 if usage_data:
@@ -358,6 +381,9 @@ async def proxy_to_mlx(
                 audit_ctx,
                 upstream_status=stream.status_code,
                 outcome=outcome,
+                usage={"prompt_tokens": prompt_toks, "completion_tokens": compl_toks}
+                if (prompt_toks or compl_toks)
+                else None,
             )
 
     return StreamingResponse(

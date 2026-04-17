@@ -12,6 +12,7 @@
 - **[Spec: TurboQuant 통합 명세]**: `docs/specs/turbo_quant_integration.md`
 
 ## §3. 계획 (docs/plans/)
+- **[Plan: 안정성 강화]**: `docs/plans/20260417_fix_oom_stability.md` (완료)
 - **[Plan: TurboQuant 계획]**: `docs/plans/20260415_turbo_quant_plan.md` (Phase B 대기)
 - **[Completed Plans (Archive)]**: `docs/plans/archive/`
     - [Spec Integration]: `docs/plans/archive/20260415_integrate_implementation_spec_v1.md`
