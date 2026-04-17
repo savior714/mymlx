@@ -13,24 +13,23 @@ alwaysApply: true
 
 - **Language SSOT**: **모든 Artifact는 한국어로 작성**. 예외: 코드 변수명, URL, API 명세 등 기술적 불가피한 영문.
 - **Sequential Thinking Mandatory (Fatal Constraint)**: **모든 작업 전에 `mcp--sequentialthinking--sequentialthinking` 도구를 사용**하여 분석을 수행한다. **단순한 작업일 경우에도 예외 없이 강제 실행**한다. 이는 작업 품질 향상과 오류 방지에 필수적이다. (**최우선**)
- - **최소 total_thoughts 10 이상 강제**: 각 분석은 **최소 10단계 이상의 사고 단계**를 거쳐야 하며, 단순한 작업일 경우에도 예외 없이 강제 실행한다.
- - **12단계 분석 프레임워크**: 각 단계는 다음을 포함해야 한다:
+ - **최소 total_thoughts 10 까지** 진행 : 각 분석은 **최소 10단계 이상의 사고 단계**를 거쳐야 하며, 단순한 작업일 경우에도 예외 없이 강제 실행한다.
+ - **10단계 분석 프레임워크**: 각 단계는 다음을 포함해야 한다:
  1. **요구사항 분석 및 입력값 검증**: 요구사항의 명확한 정의와 입력 데이터의 유효성/제약 조건을 검증한다.
  2. **엣지 케이스 식별**: 정상 흐름 외 경계 조건, 빈 값, 비정상 패턴 등 예외 케이스를 식별한다.
- 3. **잠재적 부수 효과 분석**: 변경이 기존 로직, 상태, 외부 시스템에 미치는 간접 영향을 분석한다.
- 4. **데이터 모델 설계**: 엔티티, 필드, 관계, 불변식 및 저장/조회 전략을 설계한다.
- 5. **인터페이스 규약 정의**: 모듈 간 입력/출력 계약, 에러 코드, 호출 규약을 명확히 정의한다.
- 6. **의존성 트리 분석**: 내부/외부 의존성과 버전, 결합도, 변경 전파 범위를 점검한다.
- 7. **보안 취약점 점검**: 인증/인가, 입력 검증, 민감정보 노출, 권한 경계 취약점을 점검한다.
- 8. **성능 병목 예측**: 시간/공간 복잡도, I/O, 네트워크, 동시성 병목 가능성을 예측한다.
- 9. **가용성 검토**: 장애 허용성, 재시도, 타임아웃, 복구 전략 등 서비스 연속성을 검토한다.
- 10. **최적 구현안 확정**: 대안 비교 후 요구사항·안정성·유지보수성을 고려한 최적안을 확정한다.
- 11. **예외 처리 전략 수립**: 실패 시나리오별 처리 정책, 롤백/보상 트랜잭션, 사용자 피드백 방안을 수립한다.
- 12. **최종 검증**: 설계된 솔루션이 요구사항, 안전성, 성능 기준을 충족하는지 최종 검증한다.
- - **도구 파라미터 강제**: `mcp--sequentialthinking--sequentialthinking` 호출 시 `totalThoughts`는 **최소 10 이상**을 지정해야 하며, `nextThoughtNeeded`는 `true`로 설정하여 분석이 완료될 때까지 지속한다.
+ 3. **데이터 모델 설계**: 엔티티, 필드, 관계, 불변식 및 저장/조회 전략을 설계한다.
+ 4. **인터페이스 규약 정의**: 모듈 간 입력/출력 계약, 에러 코드, 호출 규약을 명확히 정의한다.
+ 5. **의존성 트리 분석**: 내부/외부 의존성과 버전, 결합도, 변경 전파 범위를 점검한다.
+ 6. **보안 취약점 점검**: 인증/인가, 입력 검증, 민감정보 노출, 권한 경계 취약점을 점검한다.
+ 7. **성능 병목 예측**: 시간/공간 복잡도, I/O, 네트워크, 동시성 병목 가능성을 예측한다.
+ 8. **가용성 검토**: 장애 허용성, 재시도, 타임아웃, 복구 전략 등 서비스 연속성을 검토한다.
+ 9. **예외 처리 전략 수립**: 실패 시나리오별 처리 정책, 롤백/보상 트랜잭션, 사용자 피드백 방안을 수립한다.
+ 10. **최종 검증**: 설계된 솔루션이 요구사항, 안전성, 성능 기준을 충족하는지 최종 검증한다.
+ - **도구 파라미터 강제**: `mcp--sequentialthinking--sequentialthinking` 호출 시 `totalThoughts`는 **최소 10 까지** 진행해야 하며, `nextThoughtNeeded`는 `true`로 설정하여 분석이 완료될 때까지 지속한다.
 - **Serena MCP-First File Access**: 모든 파일 접근 시 **`mcp--serena--read_file` 도구를 우선 사용**. `read_file` 도구는 **사용 금지**. (이유: Serena MCP 도구가 프로젝트 내부 경로 인식 및 타입 시스템 통합이 우수하여 정확도와 안정성이 높음)
   - **도구 강제**: `.roo-code.json` 파일에서 **모든 Roo 도구를 비활성화**하여 자동 위반 방지. [`.roo-code.json`](.roo-code.json) 참조.
   - **도구 매핑**: 자세한 도구 대체 매핑은 [`docs/specs/technical/tech_roo_to_serena_mapping.md`](docs/specs/technical/tech_roo_to_serena_mapping.md) 참조.
+  - **멀티 에이전트 공통 규약**: 범용 도구 사용 정책은 [`docs/specs/tech_multi_agent_tooling.md`](docs/specs/tech_multi_agent_tooling.md) 참조.
 - **Memory SSOT Guard (Index ONLY)**: `docs/memory/MEMORY.md`는 **500라인**을 초과하면 안 된다. 초과 시 즉시 중단하고 50라인 이내 요약으로 재작성한다. 세부 컨텍스트는 `docs/memory/` 하위 모듈(`user`, `feedback`, `project`, `reference`)로 **분리/아카이브**한다. (**최우선**)
 - **Sub-module Size Guard**: `docs/memory/` 하위 모듈(예: `project_changelog_*.md`, `project_status.md` 등)은 **500라인**을 초과하면 기능별/섹션별로 별도 파일 분리 또는 아카이브한다.
 - **MEMORY Anti-Drift**: `MEMORY.md`에는 **한 줄 링크만 허용**. 장문 요약·Task 서술·기술 메모·긴 괄호 설명은 **금지**한다. (**최우선**)
@@ -120,7 +119,7 @@ alwaysApply: true
 
 모든 작업 완료 및 사용자 응답 직전, 아래 체크리스트를 내부적으로 확인한다.
 
-- [ ] **통합 검증(`./verify.sh`)**: 저장소 루트에서 `./verify.sh`를 실행했는가? **보고 전 필수.** 검증 결과를 끌어올 때는 **터미널/전체 로그를 채팅에 넣지 말고**, **Read 도구로 `verify-last-result.json` → (실패 시) `verify-pytest-failures.txt`** 순으로만 읽는다. JSON의 `agentHint`는 **영문**이며, 한글 절차 설명은 **`PROJECT_RULES.md` 4.0절**에만 있다.
+- [ ] **통합 검증(`./verify.sh`)**: 저장소 루트에서 `./verify.sh`를 실행했는가? **보고 전 필수.** 검증 결과를 끌어올 때는 **터미널/전체 로그를 채팅에 넣지 말고**, **Read 도구로 `verify-last-result.json` → (실패 시) `failedStage`에 해당하는 `verify-ruff-failures.txt` / `verify-ty-failures.txt` / `verify-pytest-failures.txt`** 순으로만 읽는다. JSON의 `agentHint`는 **영문**이며, 한글 절차 설명은 **`PROJECT_RULES.md` 4.0절**에만 있다.
 - [ ] **Verify Report**: `통합 검증` 항목에 exitCode·실패 단계·후속 조치(실패 시)를 포함했는가? (`PROJECT_RULES.md` §4.4)
 - [ ] **Line Count**: 수정된 파일이 500라인을 초과하지 않는가?
 - [ ] **Line Count**: `docs/memory/MEMORY.md`가 500라인 이내이며, **§2.1.1 금지 항목**(장문 요약·긴 괄호·기술 메모)이 없는가? 초과 시 50라인 이내로 요약 + 타입 파일·changelog로 분리했는가?
@@ -176,7 +175,7 @@ alwaysApply: true
 
 - **SDD 우선**: 구현 전에 스펙(`docs/specs/`) 정합성을 먼저 맞춘다.
 - **Memory SSOT 준수**: “세션 지식”은 `docs/memory/`, “기술 표준/아키텍처”는 `PROJECT_RULES.md`, “결정 기록”은 `docs/CRITICAL_LOGIC.md`로 분리한다.
-- **보고 형식**: 완료 시 **Verify Report(통합 검증·변경 파일/정적 검증/테스트/스모크/리스크·후속)**를 한국어로 포함한다. 통합 검증은 **Read로 읽은 `verify-last-result.json`(및 필요 시 `verify-pytest-failures.txt`)**를 근거로 쓰고, 실패 시 **원인·대상 테스트·다음 액션**을 한 블록으로 제시한다.
+- **보고 형식**: 완료 시 **Verify Report(통합 검증·변경 파일/정적 검증/테스트/스모크/리스크·후속)**를 한국어로 포함한다. 통합 검증은 **Read로 읽은 `verify-last-result.json`(및 필요 시 `failedStage`에 대응하는 `verify-*-failures.txt`)**를 근거로 쓰고, 실패 시 **원인·대상 테스트·다음 액션**을 한 블록으로 제시한다.
 
 ---
 
@@ -205,77 +204,10 @@ alwaysApply: true
 | `assess` | 프로젝트 전략 상담 — 수집기를 통해 현재 상태 진단 및 완성형 프롬프트 생성 | `.agents/workflows/assess.md` |
 | `archive` | 완료 플랜 아카이브 — `docs/plans/` → `archive/` 이동 및 참조 일괄 갱신 | `.agents/workflows/archive.md` |
 
+- 사용자가 신규 기능/복잡한 작업을 요청하면 **`plan` 워크플로우를 먼저 제안**한다.
+- 사용자가 완료 인사를 하거나 세션 종료가 임박하면 **`git` 또는 `go` 워크플로우를 제안**한다.
+
 ### 7.2 에이전트 행동 규칙
 
 - **Sequential Thinking Mandatory (Fatal Constraint)**: **모든 작업 전에 `mcp--sequentialthinking--sequentialthinking` 도구를 사용**하여 분석을 수행한다. **단순한 작업일 경우에도 예외 없이 강제 실행**한다. 이는 작업 품질 향상과 오류 방지에 필수적이다. (**최우선**)
- - **최소 total_thoughts 10 이상 강제**: 각 분석은 **최소 10단계 이상의 사고 단계**를 거쳐야 하며, 단순한 작업일 경우에도 예외 없이 강제 실행한다.
- - **12단계 분석 프레임워크**: 각 단계는 다음을 포함해야 한다:
- 1. **요구사항 분석 및 입력값 검증**: 요구사항의 명확한 정의와 입력 데이터의 유효성/제약 조건을 검증한다.
- 2. **엣지 케이스 식별**: 정상 흐름 외 경계 조건, 빈 값, 비정상 패턴 등 예외 케이스를 식별한다.
- 3. **잠재적 부수 효과 분석**: 변경이 기존 로직, 상태, 외부 시스템에 미치는 간접 영향을 분석한다.
- 4. **데이터 모델 설계**: 엔티티, 필드, 관계, 불변식 및 저장/조회 전략을 설계한다.
- 5. **인터페이스 규약 정의**: 모듈 간 입력/출력 계약, 에러 코드, 호출 규약을 명확히 정의한다.
- 6. **의존성 트리 분석**: 내부/외부 의존성과 버전, 결합도, 변경 전파 범위를 점검한다.
- 7. **보안 취약점 점검**: 인증/인가, 입력 검증, 민감정보 노출, 권한 경계 취약점을 점검한다.
- 8. **성능 병목 예측**: 시간/공간 복잡도, I/O, 네트워크, 동시성 병목 가능성을 예측한다.
- 9. **가용성 검토**: 장애 허용성, 재시도, 타임아웃, 복구 전략 등 서비스 연속성을 검토한다.
- 10. **최적 구현안 확정**: 대안 비교 후 요구사항·안정성·유지보수성을 고려한 최적안을 확정한다.
- 11. **예외 처리 전략 수립**: 실패 시나리오별 처리 정책, 롤백/보상 트랜잭션, 사용자 피드백 방안을 수립한다.
- 12. **최종 검증**: 설계된 솔루션이 요구사항, 안전성, 성능 기준을 충족하는지 최종 검증한다.
- - **도구 파라미터 강제**: `mcp--sequentialthinking--sequentialthinking` 호출 시 `totalThoughts`는 **최소 10 이상**을 지정해야 하며, `nextThoughtNeeded`는 `true`로 설정하여 분석이 완료될 때까지 지속한다.
-- 사용자가 신규 기능/복잡한 작업을 요청하면 **`plan` 워크플로우를 먼저 제안**한다.
-- 사용자가 완료 인사를 하거나 세션 종료가 임박하면 **`git` 또는 `go` 워크플로우를 제안**한다.
-- 파일이 500라인을 초과하면 **`/plan` 워크플로우를 먼저 실행**하여 논리적 분할(Logic vs UI)을 설계한다.
-- 심사진단/인증 준비 요청 시 **`audit → evidence` 순서로 제안**한다.
-- `docs/specs/` 단위로 **타 브랜드·시장 관행 비교 후 명세 보완**이 필요하면 **`compare`** 워크플로우를 따른다.
-- 완료된 Blueprint를 **삭제하지 않고** 정리할 때는 **`archive`** 워크플로우(`scripts/archive_plans.py`)를 제안한다.
-- 워크플로우 실행 시 `read_file`로 해당 `.agents/workflows/*.md`를 읽어 절차에 따른다.
-
----
-
-<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:ca08a54f -->
-## Beads Issue Tracker
-
-This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full workflow context and commands.
-
-### Quick Reference
-
-```bash
-bd ready              # Find available work
-bd show <id>          # View issue details
-bd update <id> --claim  # Claim work
-bd close <id>         # Complete work
-```
-
-### Rules
-
-- Use `bd` for ALL task tracking — do NOT use TodoWrite, TaskCreate, or markdown TODO lists
-- Run `bd prime` for detailed command reference and session close protocol
-- Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
-
-## Session Completion
-
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
-
-**MANDATORY WORKFLOW:**
-
-1. **File issues for remaining work** - Create issues for anything that needs follow-up
-2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY:
-   ```bash
-   git pull --rebase
-   bd dolt push
-   git push
-   git status  # MUST show "up to date with origin"
-   ```
-5. **Clean up** - Clear stashes, prune remote branches
-6. **Verify** - All changes committed AND pushed
-7. **Hand off** - Provide context for next session
-
-**CRITICAL RULES:**
-- Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
-<!-- END BEADS INTEGRATION -->
+ - **최소 total_thoughts 10 까지** 진행 : 각 분석은 **최소 10단계 이상의 사고 단계**를 거쳐야 하며, 단순한 작업일 경우에도 예외 없이 강제 실행한다.

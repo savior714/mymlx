@@ -4,10 +4,10 @@
 
 | 항목 | 내용 |
 |------|------|
-| **Last Verified** | 2026-04-14 |
+| **Last Verified** | 2026-04-17 |
 | **Python** | `>=3.12` (`pyproject.toml`) |
 | **Min Supported** | SDD·`AGENTS.md` 가드레일 준수 |
-| **Reference** | `README.md`, `AGENTS.md`, `specs/`, `docs/CRITICAL_LOGIC.md` |
+| **Reference** | `README.md`, `AGENTS.md`, `specs/`, `docs/specs/tech_multi_agent_tooling.md`, `docs/CRITICAL_LOGIC.md` |
 
 ---
 
@@ -27,6 +27,7 @@
 | HTTP 클라이언트 | **httpx** (프록시·헬스 체크 등) |
 | 설정 관리 | **PyYAML** + CLI·환경 변수 (우선순위: `specs/model_lifecycle.md`) |
 | 테스트 프레임워크 | **pytest** (`tests/`) |
+| 정적 분석 (dev) | **ruff** (lint), **ty** (타입 검사; 경고는 기본적으로 실패로 처리하지 않음) |
 
 **플랫폼:** Apple Silicon + MLX 최적화. Windows/Linux 전용 가정은 두지 않는다.
 
@@ -88,8 +89,8 @@
 ## 7. 검증 프로토콜 (Verification)
 
 ### 7.1 단계별 검증
-- 모든 코드 변경 후에는 저장소 루트에서 **`./verify.sh`**를 실행하여 안정성을 증명한다(내부적으로 `uv run pytest` 호출).
-- 결과 요약은 **`verify-last-result.json`**을 읽는다. 실패 시 **`verify-pytest-failures.txt`**에 pytest 출력이 기록된다.
+- 모든 코드 변경 후에는 저장소 루트에서 **`./verify.sh`**를 실행하여 안정성을 증명한다(순서: **`uv run ruff`** → **`uv run ty`** → **`uv run pytest`**; 앞 단계 실패 시 이후 단계는 생략).
+- 결과 요약은 **`verify-last-result.json`**을 읽는다. 실패 시 단계별 로그는 **`verify-ruff-failures.txt`** / **`verify-ty-failures.txt`** / **`verify-pytest-failures.txt`** 중 해당 파일을 본다.
 
 ### 7.2 완료 보고 (Verify Report)
 사용자에게 보고 시 아래 항목을 포함한다:
