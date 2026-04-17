@@ -61,13 +61,25 @@ uv run mlx-server serve --help
 - [`docs/memory/MEMORY.md`](docs/memory/MEMORY.md): 세션 지식 인덱스
 - [`docs/memory/project_changelog.md`](docs/memory/project_changelog.md): 프로젝트 변경 이력
 
-## 테스트
+## 테스트 및 검증
 
 ```bash
-uv run pytest
+just test
 ```
 
-통합 검증(ruff → ty → pytest, 에이전트 보고용 `verify-last-result.json` 생성):
+스택 정책 감사(denylist 위반 차단):
+
+```bash
+just audit-stack
+```
+
+CI와 동일한 검증 경로(lint → typecheck → test):
+
+```bash
+just ci
+```
+
+에이전트 보고용 통합 검증(`verify-last-result.json` 생성):
 
 ```bash
 ./verify.sh

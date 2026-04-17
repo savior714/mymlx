@@ -33,17 +33,17 @@
 
 ### 3.1 즉시 적용 가능 (저위험)
 
-- [ ] **Stack Audit 스크립트 도입**
+- [x] **Stack Audit 스크립트 도입**
   - 범위: denylist 파일/패턴 탐지 (`Makefile`, `Dockerfile`, `vite.config.*`, `postgres://`, `#!/bin/zsh` 등)
   - 리스크: 낮음 (검사성 로직)
   - 완료 기준: 로컬/CI에서 audit 실행 시 위반 항목이 명확히 실패 처리됨
 
-- [ ] **`Justfile` 단일 진입점 도입**
+- [x] **`Justfile` 단일 진입점 도입**
   - 범위: `lint`, `typecheck`, `test`, `ci`, `audit:stack`
   - 리스크: 낮음 (기존 명령 래핑)
   - 완료 기준: 팀 표준 명령을 `just ci`로 실행 가능
 
-- [ ] **예외 레지스트리 문서 신설**
+- [x] **예외 레지스트리 문서 신설**
   - 범위: 가이드 강제 항목 중 프로젝트 특성상 즉시 미적용 항목을 기한 포함 등록
   - 리스크: 낮음
   - 완료 기준: 예외마다 `유지 이유/제거 목표일/대체 진행률` 존재
@@ -106,11 +106,11 @@
 
 ## 5. Verification (검증 체크리스트)
 
-- [ ] `just ci` 기준으로 lint/typecheck/test가 통과한다.
-- [ ] `just audit:stack`에서 denylist 위반 시 실패한다.
-- [ ] 예외 항목이 문서화되어 있고 제거 목표일이 존재한다.
-- [ ] 신규 PR에서 allowlist 외 기술 유입 시 CI가 차단한다.
-- [ ] 운영 문서가 실제 실행 경로와 일치한다.
+- [x] `just ci` 기준으로 lint/typecheck/test가 통과한다.
+- [x] `just audit-stack`에서 denylist 위반 시 실패한다.
+- [x] 예외 항목이 문서화되어 있고 제거 목표일이 존재한다.
+- [x] 신규 PR에서 allowlist 외 기술 유입 시 CI가 차단한다.
+- [x] 운영 문서가 실제 실행 경로와 일치한다.
 
 ---
 
