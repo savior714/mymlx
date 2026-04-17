@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Unified verification: ruff + ty + pytest + machine-readable summary for agents.
+# Unified verification: ruff + ty + pytest + docs-encoding + machine-readable summary for agents.
 # Writes verify-last-result.json; on failure, verify-*-failures.txt for the failed stage.
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -9,12 +9,14 @@ JSON_OUT="${ROOT}/verify-last-result.json"
 RUFF_FAIL_OUT="${ROOT}/verify-ruff-failures.txt"
 TY_FAIL_OUT="${ROOT}/verify-ty-failures.txt"
 PY_FAIL_OUT="${ROOT}/verify-pytest-failures.txt"
+DOC_FAIL_OUT="${ROOT}/verify-docs-failures.txt"
 TMP_RUFF="$(mktemp)"
 TMP_TY="$(mktemp)"
 TMP_PY="$(mktemp)"
-trap 'rm -f "$TMP_RUFF" "$TMP_TY" "$TMP_PY"' EXIT
+TMP_DOC="$(mktemp)"
+trap 'rm -f "$TMP_RUFF" "$TMP_TY" "$TMP_PY" "$TMP_DOC"' EXIT
 
-rm -f "$JSON_OUT" "$RUFF_FAIL_OUT" "$TY_FAIL_OUT" "$PY_FAIL_OUT"
+rm -f "$JSON_OUT" "$RUFF_FAIL_OUT" "$TY_FAIL_OUT" "$PY_FAIL_OUT" "$DOC_FAIL_OUT"
 
 START_UTC="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 _ms() { uv run python -c "import time; print(int(time.time() * 1000))"; }
@@ -56,6 +58,9 @@ fi
 
 PYEXIT=0
 PY_MS=0
+DOC_EXIT=0
+DOC_MS=0
+SKIP_DOC=0
 if [[ "$RUFF_EXIT" -eq 0 && "$TY_EXIT" -eq 0 ]]; then
   PY_START="$(_ms)"
   set +e
@@ -69,12 +74,29 @@ if [[ "$RUFF_EXIT" -eq 0 && "$TY_EXIT" -eq 0 ]]; then
   fi
 else
   SKIP_PY=1
+  SKIP_DOC=1
+fi
+
+if [[ "$RUFF_EXIT" -eq 0 && "$TY_EXIT" -eq 0 && "$PYEXIT" -eq 0 ]]; then
+  DOC_START="$(_ms)"
+  set +e
+  uv run python scripts/verify_korean_text.py --dir docs 2>&1 | tee "$TMP_DOC"
+  DOC_EXIT="${PIPESTATUS[0]}"
+  set -e
+  DOC_END="$(_ms)"
+  DOC_MS=$((DOC_END - DOC_START))
+  if [[ "$DOC_EXIT" -ne 0 ]]; then
+    cp "$TMP_DOC" "$DOC_FAIL_OUT"
+  fi
+else
+  SKIP_DOC=1
 fi
 
 OVERALL=0
 if [[ "$RUFF_EXIT" -ne 0 ]]; then OVERALL=$RUFF_EXIT
 elif [[ "$TY_EXIT" -ne 0 ]]; then OVERALL=$TY_EXIT
 elif [[ "$PYEXIT" -ne 0 ]]; then OVERALL=$PYEXIT
+elif [[ "$DOC_EXIT" -ne 0 ]]; then OVERALL=$DOC_EXIT
 fi
 
 export V_SCHEMA="mlx_server.verify.v2"
@@ -89,6 +111,9 @@ export V_SKIP_TY="$SKIP_TY"
 export V_PYEXIT="$PYEXIT"
 export V_PY_MS="$PY_MS"
 export V_SKIP_PY="$SKIP_PY"
+export V_DOC_EXIT="$DOC_EXIT"
+export V_DOC_MS="$DOC_MS"
+export V_SKIP_DOC="$SKIP_DOC"
 
 uv run python <<'PY'
 import json
@@ -102,7 +127,9 @@ def hint() -> str:
         return "ruff failed; read verify-ruff-failures.txt for details."
     if int(os.environ["V_TY_EXIT"]) != 0:
         return "ty failed; read verify-ty-failures.txt for details."
-    return "pytest failed; read verify-pytest-failures.txt for details."
+    if int(os.environ["V_PYEXIT"]) != 0:
+        return "pytest failed; read verify-pytest-failures.txt for details."
+    return "docs verification failed; read verify-docs-failures.txt for details."
 
 
 def failed_stage():
@@ -112,7 +139,9 @@ def failed_stage():
         return "ruff"
     if int(os.environ["V_TY_EXIT"]) != 0:
         return "ty"
-    return "pytest"
+    if int(os.environ["V_PYEXIT"]) != 0:
+        return "pytest"
+    return "docs"
 
 
 stages = [
@@ -140,6 +169,16 @@ else:
             "name": "pytest",
             "exitCode": int(os.environ["V_PYEXIT"]),
             "elapsedMs": int(os.environ["V_PY_MS"]),
+        }
+    )
+if int(os.environ["V_SKIP_DOC"]):
+    stages.append({"name": "docs", "exitCode": None, "elapsedMs": 0, "skipped": True})
+else:
+    stages.append(
+        {
+            "name": "docs",
+            "exitCode": int(os.environ["V_DOC_EXIT"]),
+            "elapsedMs": int(os.environ["V_DOC_MS"]),
         }
     )
 
